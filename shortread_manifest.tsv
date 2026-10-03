@@ -1,0 +1,12 @@
+# Manifest for 02_shortread_introgression.sh
+# Tab-separated. One row per short-read population sample (can be many more
+# individuals than the 23 assembled genomes — this is population-level
+# resequencing data). Lines starting with '#' are ignored.
+#
+# species must be one of the 3 focal species labels used in
+# assembly_manifest.tsv, OR the literal keyword "Outgroup" for outgroup
+# samples (e.g. chicken/Gallus gallus resequencing) used to polarize the
+# D-statistics. At least one Outgroup sample is required.
+sample_id	species	fastq_r1	fastq_r2
+# EXAMPLE_pop_sample	STGR	/path/to/EXAMPLE_R1.fastq.gz	/path/to/EXAMPLE_R2.fastq.gz
+# EXAMPLE_outgroup_sample	Outgroup	/path/to/EXAMPLE_outgroup_R1.fastq.gz	/path/to/EXAMPLE_outgroup_R2.fastq.gz

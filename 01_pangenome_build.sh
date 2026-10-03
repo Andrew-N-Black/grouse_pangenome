@@ -1,0 +1,528 @@
+#!/bin/bash
+# =============================================================================
+# SLURM JOB SUBMISSION: 3-SPECIES PANGENOME + COMPARATIVE ANALYSIS
+# Step 01 — requires the ASSEMBLY pipeline (separate repo: prairie_grouse) to
+# have completed through its step 05 for every sample you want included. This
+# script reads that pipeline's final_ptarmigan/ directory: hifiasm + yahs +
+# RagTag pseudo-chromosome assemblies, with Liftoff gene annotations
+# transferred from the rock ptarmigan reference.
+#
+# Builds ONE combined pangenome graph across all haplotype assemblies from
+# all three species (PGGB), then uses it — plus the existing Liftoff/TE
+# annotations — to compare Sharp-tailed Grouse, Lesser Prairie-Chicken, and
+# Greater Prairie-Chicken on:
+#   - assembly length (per-haplotype path length in the graph)
+#   - transposable element content (RepeatModeler + RepeatMasker)
+#   - gene content (Liftoff-mapped ptarmigan gene counts)
+#
+# This is NOT an array job: a pangenome is inherently a joint analysis across
+# all samples, so everything runs in one job. The one genuinely
+# embarrassingly-parallel sub-step (RepeatMasker per genome) is parallelized
+# internally with `xargs -P`.
+#
+# HONEST SCOPE NOTE: whole-genome PGGB across ~46 haplotypes of ~1.1 Gb bird
+# genomes is a heavy, potentially multi-day-to-multi-week alignment job. The
+# resource/time requests below are rough starting points, not a guarantee —
+# check them against what your Purdue RCAC allocation actually offers, and
+# consider per-chromosome partitioning (pggb's `partition-before-pggb`
+# helper) if the whole-genome run doesn't finish in your walltime. Because
+# your assemblies are already RagTag-oriented against the same rock ptarmigan
+# reference, chromosome-level partitioning should work cleanly if needed.
+#
+# A NOTE ON CHROMOSOME NAMES
+#   The assemblies carry the ptarmigan reference's own chromosome numbering,
+#   which is a DESCENDING-LENGTH RANK, not homology to the chicken karyotype:
+#   chr_6 here is not chicken chromosome 6. Nothing in this script depends on
+#   that, because every assembly uses the same convention — but any result
+#   reported per chromosome has to be translated through the correspondence
+#   table the assembly repo's step 04 produces before it can be compared
+#   against the galliform literature.
+#
+# USAGE:
+#   sbatch 01_pangenome_build.sh
+# =============================================================================
+#SBATCH --job-name=grouse_pangenome
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
+#SBATCH -A dewoody
+#SBATCH -t 14-00:00:00
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=64
+#SBATCH --mem=500G
+#SBATCH -p cpu
+#SBATCH --mail-type=BEGIN,END,FAIL
+# Literal address: SBATCH directives are comments to the shell, so ${USER}
+# would NOT be expanded here, and the mail would go to a user named "${USER}".
+#SBATCH --mail-user=blackan@purdue.edu
+
+# =============================================================================
+# ENVIRONMENT SETUP
+# =============================================================================
+set -euo pipefail
+
+# unset LD_PRELOAD: RCAC's XALT library is injected this way and fails on some
+# nodes (GLIBC mismatch), which can kill subshells under `set -e`.
+unset LD_PRELOAD
+
+ml biocontainers
+ml samtools/1.22.1
+ml pggb        # bundles wfmash/seqwish/smoothxg/odgi — module availability
+                # varies by cluster; pggb is also distributed as a Singularity
+                # container (https://github.com/pangenome/pggb#singularity)
+ml odgi
+# No panacus module and no cargo/Rust toolchain on this cluster, so it's
+# fetched below as a precompiled static (musl) binary — no compilation
+# needed. See PANACUS_BIN setup further down.
+ml repeatmodeler
+ml repeatmasker
+ml python
+
+# =============================================================================
+# USER-DEFINED VARIABLES
+# =============================================================================
+MANIFEST="${SLURM_SUBMIT_DIR}/assembly_manifest.tsv"
+
+# Same PROJECT_DIR as the assembly pipeline — this reads its output in place.
+PROJECT_DIR="${CLUSTER_SCRATCH}/GROUSE/grouse_asm"
+
+# Which reference the assemblies were ordered against. The assembly pipeline
+# suffixes its output trees with this, so a run against a different reference
+# produces a parallel tree and both can be kept side by side. Must match
+# REF_TAG in that pipeline's 05_ragtag_liftoff_array.sh.
+REF_TAG="ptarmigan"
+
+FINAL_DIR="${PROJECT_DIR}/final_${REF_TAG}"      # input: assemblies + Liftoff GFF3
+LIFTOFF_DIR="${PROJECT_DIR}/liftoff_${REF_TAG}"  # input: unmapped-feature lists
+PANGENOME_DIR="${PROJECT_DIR}/pangenome"
+TE_DIR="${PROJECT_DIR}/te_annotation"
+COMPARE_DIR="${PROJECT_DIR}/comparison"
+
+COMBINED_FASTA="${PANGENOME_DIR}/combined_haplotypes.fa"
+
+# panacus — precompiled static (musl) binary, cached under PROJECT_DIR so
+# this only downloads once across reruns. No cargo/Rust toolchain required.
+PANACUS_VERSION="0.5.1"
+PANACUS_BIN="${PROJECT_DIR}/panacus-${PANACUS_VERSION}/bin/panacus"
+
+# PGGB alignment parameters — moderate cross-species divergence within the
+# genus Tympanuchus. See https://pggb.readthedocs.io/en/latest/rst/essential_parameters.html
+PGGB_MIN_IDENTITY=90
+PGGB_SEGMENT_LEN="5k"
+
+THREADS=$SLURM_CPUS_PER_TASK
+# Concurrency for the per-genome RepeatMasker loop (each call still gets
+# multiple threads via -pa); tune alongside THREADS.
+TE_PARALLEL_JOBS=4
+TE_THREADS_PER_JOB=$(( THREADS / TE_PARALLEL_JOBS > 0 ? THREADS / TE_PARALLEL_JOBS : 1 ))
+
+mkdir -p logs "$PANGENOME_DIR" "$TE_DIR" "$COMPARE_DIR"
+
+# =============================================================================
+# INSTALL panacus (once — skipped on reruns if already present)
+# No module and no cargo/Rust toolchain on this cluster, so we pull the
+# precompiled musl-linked binary from GitHub releases instead of building
+# from source. musl = statically linked, so it runs on any x86_64 Linux
+# node regardless of glibc version — no runtime dependencies to manage.
+# =============================================================================
+if [[ ! -x "$PANACUS_BIN" ]]; then
+    echo ">>> Installing panacus v${PANACUS_VERSION} (precompiled binary)"
+    PANACUS_TARBALL="panacus-${PANACUS_VERSION}_x86_64-unknown-linux-musl.tar.gz"
+    PANACUS_INSTALL_DIR="${PROJECT_DIR}/panacus-${PANACUS_VERSION}"
+    PANACUS_TMP="${PROJECT_DIR}/.panacus_extract_tmp"
+
+    rm -rf "$PANACUS_TMP"
+    mkdir -p "$PANACUS_TMP" "$PANACUS_INSTALL_DIR"
+    wget -q -O "${PANACUS_TMP}/${PANACUS_TARBALL}" \
+        "https://github.com/marschall-lab/panacus/releases/download/v${PANACUS_VERSION}/${PANACUS_TARBALL}"
+    tar -xzf "${PANACUS_TMP}/${PANACUS_TARBALL}" -C "$PANACUS_TMP"
+
+    # Move the archive's inner contents up into PANACUS_INSTALL_DIR rather
+    # than relying on `tar --strip-components` — tested interactively and it
+    # did not flatten the release's top-level directory as expected, so this
+    # is deliberately independent of that archive's exact internal layout.
+    PANACUS_INNER_DIR=$(find "$PANACUS_TMP" -mindepth 1 -maxdepth 1 -type d | head -n1)
+    if [[ -z "$PANACUS_INNER_DIR" ]]; then
+        echo "ERROR: panacus archive did not extract as expected — check ${PANACUS_TMP}"
+        exit 1
+    fi
+    mv "$PANACUS_INNER_DIR"/* "$PANACUS_INSTALL_DIR"/
+    rm -rf "$PANACUS_TMP"
+fi
+
+if [[ ! -x "$PANACUS_BIN" ]]; then
+    echo "ERROR: panacus install failed — expected binary not found at ${PANACUS_BIN}"
+    exit 1
+fi
+
+echo ">>> 01_pangenome_build.sh"
+echo ">>> Node      : $(hostname)"
+echo ">>> CPUs      : ${THREADS}"
+echo ">>> Start time: $(date)"
+
+if [[ ! -f "$MANIFEST" ]]; then
+    echo "ERROR: Manifest not found: ${MANIFEST}"
+    exit 1
+fi
+
+# =============================================================================
+# MANIFEST SANITY CHECK
+# Every assembly path below is built as <SPECIES>_<SAMPLE>_<HAP>.pseudo_chr.fasta
+# from the manifest's own fields. A stray leading or trailing space in either
+# field therefore changes the path it looks for, and the only symptom is a
+# "WARNING: missing assembly ... skipping" line buried in the log — the
+# pangenome then quietly gets built from a subset of the panel. Catch it here
+# instead. This does NOT trim the fields: if the assembly pipeline ran with the
+# same whitespace, the files on disk carry it too, and silently trimming would
+# break paths that currently work. Fix the manifest and re-run both pipelines,
+# or leave it alone deliberately.
+# =============================================================================
+WS_ROWS=$(awk -F'\t' '
+    !/^#/ && FNR > 1 && NF > 1 {
+        if ($1 ~ /^[ \t]|[ \t]$/ || $2 ~ /^[ \t]|[ \t]$/)
+            printf "    line %d: sample=[%s] species=[%s]\n", FNR, $1, $2
+    }' "$MANIFEST")
+if [[ -n "$WS_ROWS" ]]; then
+    echo ""
+    echo "  !! WARNING: leading/trailing whitespace in sample or species fields:"
+    echo "$WS_ROWS"
+    echo "     Assembly filenames are built from these fields verbatim, so these"
+    echo "     rows will only be found if the assembly pipeline ran with the same"
+    echo "     whitespace. Check the 'Collected N haplotype assemblies' count"
+    echo "     below against the number of rows in the manifest before trusting"
+    echo "     the graph."
+    echo ""
+fi
+
+# =============================================================================
+# STEP 1: Collect phased assemblies, rename headers to PanSN-spec
+# (sample#haplotype#contig), and build one combined multi-FASTA.
+# Species and sample are read from the manifest (not parsed back out of
+# filenames) since either field may itself contain underscores.
+# =============================================================================
+echo ">>> Step 1: Collecting phased assemblies -> ${COMBINED_FASTA}"
+
+> "$COMBINED_FASTA"
+
+sanitize() {
+    echo "$1" | tr -c 'A-Za-z0-9_-' '_'
+}
+
+N_HAPS=0
+mapfile -t MANIFEST_ROWS < <(grep -v '^#' "$MANIFEST" | tail -n +2)
+
+for LINE in "${MANIFEST_ROWS[@]}"; do
+    IFS=$'\t' read -r SAMPLE SPECIES _ _ _ _ <<< "$LINE"
+    [[ -z "$SAMPLE" ]] && continue
+
+    SAMPLE_TAG=$(sanitize "$SAMPLE")
+    SPECIES_TAG=$(sanitize "$SPECIES")
+    PANSN_SAMPLE="${SPECIES_TAG}.${SAMPLE_TAG}"
+
+    for HAP in hap1 hap2; do
+        ASSEMBLY="${FINAL_DIR}/${SPECIES}_${SAMPLE}_${HAP}.pseudo_chr.fasta"
+
+        if [[ ! -f "$ASSEMBLY" ]]; then
+            echo "  WARNING: missing assembly for ${SAMPLE} (${SPECIES}) ${HAP} — skipping: ${ASSEMBLY}" >&2
+            continue
+        fi
+
+        awk -v pre="${PANSN_SAMPLE}#${HAP}" '
+            /^>/ { split($0, a, " "); name = substr(a[1], 2); print ">" pre "#" name; next }
+            { print }
+        ' "$ASSEMBLY" >> "$COMBINED_FASTA"
+
+        N_HAPS=$((N_HAPS + 1))
+    done
+done
+
+echo "  Collected ${N_HAPS} haplotype assemblies"
+
+if [[ "$N_HAPS" -lt 2 ]]; then
+    echo "ERROR: fewer than 2 haplotype assemblies found — nothing to build a pangenome from."
+    echo "       Looked in ${FINAL_DIR} for <SPECIES>_<SAMPLE>_hap{1,2}.pseudo_chr.fasta"
+    echo "       Check that the assembly pipeline's 05_ragtag_liftoff_array.sh has"
+    echo "       completed for at least one sample, and that REF_TAG matches."
+    exit 1
+fi
+
+# =============================================================================
+# STEP 2: bgzip + index the combined FASTA (pggb's expected input format)
+# =============================================================================
+echo ">>> Step 2: Compressing and indexing combined FASTA"
+
+if [[ ! -f "${COMBINED_FASTA}.gz" ]]; then
+    bgzip -@ "$THREADS" -f "$COMBINED_FASTA"
+fi
+samtools faidx "${COMBINED_FASTA}.gz"
+
+# =============================================================================
+# STEP 3: Build the pangenome graph with pggb
+# Skipped if a prior run already produced a final GFA (heavy step — safe to
+# resubmit without redoing it).
+# =============================================================================
+echo ">>> Step 3: pggb pangenome construction (n=${N_HAPS} haplotypes)"
+
+EXISTING_GFA=$(find "$PANGENOME_DIR" -name "*.final.gfa" 2>/dev/null | head -n1)
+
+if [[ -n "$EXISTING_GFA" ]]; then
+    echo "  Existing pangenome graph found — skipping pggb run: ${EXISTING_GFA}"
+else
+    pggb \
+        -i "${COMBINED_FASTA}.gz" \
+        -o "$PANGENOME_DIR" \
+        -n "$N_HAPS" \
+        -p "$PGGB_MIN_IDENTITY" \
+        -s "$PGGB_SEGMENT_LEN" \
+        -t "$THREADS"
+fi
+
+GFA=$(find "$PANGENOME_DIR" -name "*.final.gfa" 2>/dev/null | head -n1)
+OG=$(find "$PANGENOME_DIR" -name "*.final.og" 2>/dev/null | head -n1)
+
+if [[ -z "$GFA" || -z "$OG" ]]; then
+    echo "ERROR: pggb did not produce the expected *.final.gfa / *.final.og in ${PANGENOME_DIR}"
+    exit 1
+fi
+
+echo "  Pangenome graph: ${GFA}"
+
+# =============================================================================
+# STEP 4: Graph-level summary + per-haplotype path (assembly) lengths
+# =============================================================================
+echo ">>> Step 4: Pangenome graph summary and per-haplotype lengths"
+
+odgi stats -i "$OG" -S > "${COMPARE_DIR}/pangenome_graph_summary.yaml"
+
+# `odgi paths -H -D '#'` prints a header line, then columns:
+#   group.name  path.name  path.length  path.step.count  [node.1 ... node.N]
+# group.name is everything before the first '#' in path.name — for our
+# PanSN names (species.sample#hap#contig) that's "species.sample".
+odgi paths -i "$OG" -H -D '#' -t "$THREADS" > "${COMPARE_DIR}/path_lengths_raw.tsv"
+echo -e "species\tsample\thaplotype\tcontig\tpath_length_bp" > "${COMPARE_DIR}/genome_length_by_haplotype.tsv"
+awk -F'\t' 'NR>1 {
+    split($1, sp, ".")          # $1=group.name=species.sample -> sp[1]=species sp[2]=sample
+    split($2, p, "#")           # $2=path.name=species.sample#hap#contig -> p[2]=hap p[3]=contig
+    print sp[1]"\t"sp[2]"\t"p[2]"\t"p[3]"\t"$3
+}' "${COMPARE_DIR}/path_lengths_raw.tsv" >> "${COMPARE_DIR}/genome_length_by_haplotype.tsv"
+
+echo "  Wrote ${COMPARE_DIR}/genome_length_by_haplotype.tsv"
+
+# =============================================================================
+# STEP 5: Core/accessory sequence content by species (panacus)
+# Wrapped so an unexpected panacus grouping-format issue doesn't take down
+# the rest of the pipeline — TE and gene comparisons below don't depend on it.
+# =============================================================================
+echo ">>> Step 5: Core/accessory pangenome growth by species (panacus)"
+
+odgi paths -i "$OG" -L -t "$THREADS" > "${COMPARE_DIR}/path_names.txt"
+awk -F'#' '{ split($1, g, "."); print $0"\t"g[1] }' "${COMPARE_DIR}/path_names.txt" \
+    > "${COMPARE_DIR}/panacus_groups.tsv"
+
+set +e
+"$PANACUS_BIN" histgrowth -t "$THREADS" -s "${COMPARE_DIR}/panacus_groups.tsv" "$GFA" \
+    > "${COMPARE_DIR}/pangenome_histgrowth_by_species.tsv"
+PANACUS_STATUS=$?
+set -e
+
+if [[ "$PANACUS_STATUS" -ne 0 ]]; then
+    echo "  WARNING: panacus histgrowth failed (exit ${PANACUS_STATUS})."
+    echo "  Check the -s grouping file format against '${PANACUS_BIN} histgrowth --help'"
+    echo "  and rerun manually — this does not block the TE/gene comparisons below."
+fi
+
+# =============================================================================
+# STEP 6: Transposable element annotation
+# One de novo RepeatModeler2 library per species (built from one
+# representative haplotype), merged, then RepeatMasker run against every
+# haplotype assembly so both species-level and within-species TE content
+# can be reported.
+# =============================================================================
+echo ">>> Step 6: Transposable element annotation"
+
+MERGED_TE_LIB="${TE_DIR}/merged_TE_library.fa"
+> "$MERGED_TE_LIB"
+
+declare -A SEEN_SPECIES
+
+for LINE in "${MANIFEST_ROWS[@]}"; do
+    IFS=$'\t' read -r SAMPLE SPECIES _ _ _ _ <<< "$LINE"
+    [[ -z "$SAMPLE" ]] && continue
+    [[ -n "${SEEN_SPECIES[$SPECIES]:-}" ]] && continue
+
+    REP_ASSEMBLY="${FINAL_DIR}/${SPECIES}_${SAMPLE}_hap1.pseudo_chr.fasta"
+    [[ ! -f "$REP_ASSEMBLY" ]] && continue
+
+    SEEN_SPECIES[$SPECIES]=1
+    SPECIES_TAG=$(sanitize "$SPECIES")
+    DB_NAME="${TE_DIR}/${SPECIES_TAG}_repeatdb"
+    FAMILIES_FA="${DB_NAME}-families.fa"
+
+    echo "  Building RepeatModeler library for ${SPECIES} (representative: ${SAMPLE})"
+
+    if [[ ! -f "$FAMILIES_FA" ]]; then
+        BuildDatabase -name "$DB_NAME" "$REP_ASSEMBLY"
+        RepeatModeler -database "$DB_NAME" -threads "$THREADS" -LTRStruct
+    else
+        echo "    Library already built — skipping"
+    fi
+
+    cat "$FAMILIES_FA" >> "$MERGED_TE_LIB"
+done
+
+echo "  Merged TE library: ${MERGED_TE_LIB} ($(grep -c '^>' "$MERGED_TE_LIB") consensus sequences)"
+
+echo ">>> Step 6b: RepeatMasker on every haplotype assembly (parallel x${TE_PARALLEL_JOBS})"
+
+RM_JOBLIST="${TE_DIR}/repeatmasker_jobs.txt"
+> "$RM_JOBLIST"
+
+for LINE in "${MANIFEST_ROWS[@]}"; do
+    IFS=$'\t' read -r SAMPLE SPECIES _ _ _ _ <<< "$LINE"
+    [[ -z "$SAMPLE" ]] && continue
+    for HAP in hap1 hap2; do
+        ASSEMBLY="${FINAL_DIR}/${SPECIES}_${SAMPLE}_${HAP}.pseudo_chr.fasta"
+        [[ -f "$ASSEMBLY" ]] && echo "$ASSEMBLY" >> "$RM_JOBLIST"
+    done
+done
+
+run_repeatmasker() {
+    local assembly="$1"
+    local outdir="${TE_DIR}/$(basename "${assembly%.fasta}")"
+    mkdir -p "$outdir"
+    if [[ -f "${outdir}/$(basename "$assembly").tbl" ]]; then
+        echo "    Already masked — skipping: ${assembly}"
+        return 0
+    fi
+    RepeatMasker -pa "$TE_THREADS_PER_JOB" -lib "$MERGED_TE_LIB" -gff -dir "$outdir" "$assembly"
+}
+export -f run_repeatmasker sanitize
+export MERGED_TE_LIB TE_DIR TE_THREADS_PER_JOB
+
+xargs -a "$RM_JOBLIST" -I{} -P "$TE_PARALLEL_JOBS" bash -c 'run_repeatmasker "$@"' _ {}
+
+# =============================================================================
+# STEP 7: Summarize TE content and gene content (Liftoff) per haplotype,
+# then aggregate everything by species.
+# =============================================================================
+echo ">>> Step 7: Aggregating TE + gene content + length by species"
+
+python3 - "$COMPARE_DIR" "$FINAL_DIR" "$LIFTOFF_DIR" "$TE_DIR" "$MANIFEST" << 'PYEOF'
+import csv, os, re, statistics, sys
+
+compare_dir, final_dir, liftoff_dir, te_dir, manifest_path = sys.argv[1:6]
+
+# --- read manifest: ordered list of (species, sample) ---
+with open(manifest_path) as fh:
+    data_rows = [l for l in fh if not l.startswith('#')]
+    reader = csv.DictReader(data_rows, delimiter='\t')
+    samples = [(row['species'], row['sample_id']) for row in reader if row.get('sample_id')]
+
+records = {}  # (species, sample, hap) -> dict of metrics
+
+def rec(species, sample, hap):
+    return records.setdefault((species, sample, hap), {
+        'species': species, 'sample': sample, 'haplotype': hap,
+        'length_bp': None, 'genes_mapped': None, 'genes_unmapped': None,
+        'te_pct_masked': None,
+    })
+
+# --- genome length, from the pangenome path table written in Step 4 ---
+length_tsv = os.path.join(compare_dir, 'genome_length_by_haplotype.tsv')
+per_hap_len = {}
+if os.path.exists(length_tsv):
+    with open(length_tsv) as fh:
+        reader = csv.DictReader(fh, delimiter='\t')
+        for row in reader:
+            key = (row['species'], row['sample'], row['haplotype'])
+            per_hap_len[key] = per_hap_len.get(key, 0) + int(row['path_length_bp'])
+for key, total in per_hap_len.items():
+    rec(*key)['length_bp'] = total
+
+# All paths below are constructed forward from (species, sample, hap) taken
+# straight from the manifest — never reverse-parsed out of filenames, since
+# species/sample values may themselves contain underscores.
+te_re = re.compile(r'Total interspersed repeats.*?([\d.]+)\s*%')
+
+for species, sample in samples:
+    for hap in ('hap1', 'hap2'):
+        # --- gene content, from Liftoff GFF3 + unmapped-feature lists ---
+        gff = os.path.join(final_dir, f"{species}_{sample}_{hap}.liftoff.gff3")
+        if os.path.exists(gff):
+            n_genes = 0
+            with open(gff) as fh:
+                for line in fh:
+                    if line.startswith('#'):
+                        continue
+                    fields = line.split('\t')
+                    if len(fields) > 2 and fields[2] == 'gene':
+                        n_genes += 1
+            rec(species, sample, hap)['genes_mapped'] = n_genes
+
+        unmapped = os.path.join(liftoff_dir, f"{sample}.{hap}.unmapped_features.txt")
+        if os.path.exists(unmapped):
+            with open(unmapped) as fh:
+                rec(species, sample, hap)['genes_unmapped'] = sum(1 for _ in fh)
+
+        # --- TE content, from the RepeatMasker .tbl summary ---
+        # Must match run_repeatmasker()'s naming exactly:
+        #   outdir = TE_DIR/<assembly basename minus .fasta>
+        #   tbl    = outdir/<assembly basename>.tbl
+        assembly_stem = f"{species}_{sample}_{hap}.pseudo_chr"
+        assembly_name = f"{assembly_stem}.fasta"
+        tbl = os.path.join(te_dir, assembly_stem, f"{assembly_name}.tbl")
+        if os.path.exists(tbl):
+            with open(tbl) as fh:
+                for line in fh:
+                    m = te_re.search(line)
+                    if m:
+                        rec(species, sample, hap)['te_pct_masked'] = float(m.group(1))
+                        break
+
+# --- write per-haplotype table ---
+per_hap_out = os.path.join(compare_dir, 'per_haplotype_summary.tsv')
+fields = ['species', 'sample', 'haplotype', 'length_bp', 'genes_mapped', 'genes_unmapped', 'te_pct_masked']
+with open(per_hap_out, 'w', newline='') as fh:
+    w = csv.DictWriter(fh, fieldnames=fields, delimiter='\t')
+    w.writeheader()
+    for r in sorted(records.values(), key=lambda r: (r['species'], r['sample'], r['haplotype'])):
+        w.writerow(r)
+
+# --- aggregate by species (mean +/- sd, skipping missing values) ---
+by_species = {}
+for r in records.values():
+    by_species.setdefault(r['species'], []).append(r)
+
+species_out = os.path.join(compare_dir, 'species_comparison_summary.tsv')
+with open(species_out, 'w', newline='') as fh:
+    w = csv.writer(fh, delimiter='\t')
+    w.writerow(['species', 'n_haplotypes',
+                'mean_length_bp', 'sd_length_bp',
+                'mean_genes_mapped', 'sd_genes_mapped',
+                'mean_genes_unmapped', 'sd_genes_unmapped',
+                'mean_te_pct_masked', 'sd_te_pct_masked'])
+    for species, recs in sorted(by_species.items()):
+        def col(name):
+            vals = [r[name] for r in recs if r[name] is not None]
+            if not vals:
+                return ('NA', 'NA')
+            mean = statistics.mean(vals)
+            sd = statistics.stdev(vals) if len(vals) > 1 else 0.0
+            return (f'{mean:.2f}', f'{sd:.2f}')
+        length_m, length_sd = col('length_bp')
+        gm_m, gm_sd = col('genes_mapped')
+        gu_m, gu_sd = col('genes_unmapped')
+        te_m, te_sd = col('te_pct_masked')
+        w.writerow([species, len(recs), length_m, length_sd, gm_m, gm_sd, gu_m, gu_sd, te_m, te_sd])
+
+print(f"  Wrote {per_hap_out}")
+print(f"  Wrote {species_out}")
+PYEOF
+
+echo ""
+echo ">>> Pangenome + comparative analysis complete."
+echo "    Pangenome graph        : ${GFA}"
+echo "    Per-haplotype summary  : ${COMPARE_DIR}/per_haplotype_summary.tsv"
+echo "    Species comparison     : ${COMPARE_DIR}/species_comparison_summary.tsv"
+echo "    Core/accessory growth  : ${COMPARE_DIR}/pangenome_histgrowth_by_species.tsv"
+echo ">>> End time: $(date)"
