@@ -1,11 +1,14 @@
 #!/bin/bash
 # =============================================================================
 # SLURM JOB SUBMISSION: 3-SPECIES PANGENOME + COMPARATIVE ANALYSIS
-# Step 01 — requires the ASSEMBLY pipeline (separate repo: prairie_grouse) to
-# have completed through its step 05 for every sample you want included. This
-# script reads that pipeline's final_ptarmigan/ directory: hifiasm + yahs +
-# RagTag pseudo-chromosome assemblies, with Liftoff gene annotations
-# transferred from the rock ptarmigan reference.
+# Step 03 — requires steps 01-02 of this repo, which in turn read the ASSEMBLY
+# pipeline's output (separate repo: prairie_grouse). The GRAPH is built from
+# step 01's pangenome_inputs/ FASTAs (Hi-C-unsupported RagTag joins cut);
+# the TE and gene comparisons read the assembly pipeline's final_ptarmigan/
+# directly (hifiasm + yahs + RagTag pseudo-chromosomes, with Liftoff gene
+# annotations transferred from the rock ptarmigan reference), since cutting
+# a join removes only a 100 bp gap and the Liftoff GFF3 seqids name the
+# uncut chromosomes.
 #
 # Builds ONE combined pangenome graph across all haplotype assemblies from
 # all three species (PGGB), then uses it — plus the existing Liftoff/TE
@@ -39,7 +42,7 @@
 #   against the galliform literature.
 #
 # USAGE:
-#   sbatch 01_pangenome_build.sh
+#   sbatch 03_pangenome_build.sh
 # =============================================================================
 #SBATCH --job-name=grouse_pangenome
 #SBATCH --output=logs/%x_%j.out
@@ -92,7 +95,8 @@ PROJECT_DIR="${CLUSTER_SCRATCH}/GROUSE/grouse_asm"
 # REF_TAG in that pipeline's 05_ragtag_liftoff_array.sh.
 REF_TAG="ptarmigan"
 
-FINAL_DIR="${PROJECT_DIR}/final_${REF_TAG}"      # input: assemblies + Liftoff GFF3
+FINAL_DIR="${PROJECT_DIR}/final_${REF_TAG}"      # input: assemblies + Liftoff GFF3 (TE/gene tables)
+INPUT_DIR="${PROJECT_DIR}/pangenome_inputs"     # input: graph FASTAs from step 01
 LIFTOFF_DIR="${PROJECT_DIR}/liftoff_${REF_TAG}"  # input: unmapped-feature lists
 PANGENOME_DIR="${PROJECT_DIR}/pangenome"
 TE_DIR="${PROJECT_DIR}/te_annotation"
@@ -155,7 +159,7 @@ if [[ ! -x "$PANACUS_BIN" ]]; then
     exit 1
 fi
 
-echo ">>> 01_pangenome_build.sh"
+echo ">>> 03_pangenome_build.sh"
 echo ">>> Node      : $(hostname)"
 echo ">>> CPUs      : ${THREADS}"
 echo ">>> Start time: $(date)"
@@ -167,7 +171,8 @@ fi
 
 # =============================================================================
 # MANIFEST SANITY CHECK
-# Every assembly path below is built as <SPECIES>_<SAMPLE>_<HAP>.pseudo_chr.fasta
+# Every assembly path below is built as <SPECIES>_<SAMPLE>_<HAP>.pg_input.fasta
+# (graph) or .pseudo_chr.fasta (TE/gene tables)
 # from the manifest's own fields. A stray leading or trailing space in either
 # field therefore changes the path it looks for, and the only symptom is a
 # "WARNING: missing assembly ... skipping" line buried in the log — the
@@ -220,7 +225,7 @@ for LINE in "${MANIFEST_ROWS[@]}"; do
     PANSN_SAMPLE="${SPECIES_TAG}.${SAMPLE_TAG}"
 
     for HAP in hap1 hap2; do
-        ASSEMBLY="${FINAL_DIR}/${SPECIES}_${SAMPLE}_${HAP}.pseudo_chr.fasta"
+        ASSEMBLY="${INPUT_DIR}/${SPECIES}_${SAMPLE}_${HAP}.pg_input.fasta"
 
         if [[ ! -f "$ASSEMBLY" ]]; then
             echo "  WARNING: missing assembly for ${SAMPLE} (${SPECIES}) ${HAP} — skipping: ${ASSEMBLY}" >&2
@@ -240,8 +245,8 @@ echo "  Collected ${N_HAPS} haplotype assemblies"
 
 if [[ "$N_HAPS" -lt 2 ]]; then
     echo "ERROR: fewer than 2 haplotype assemblies found — nothing to build a pangenome from."
-    echo "       Looked in ${FINAL_DIR} for <SPECIES>_<SAMPLE>_hap{1,2}.pseudo_chr.fasta"
-    echo "       Check that the assembly pipeline's 05_ragtag_liftoff_array.sh has"
+    echo "       Looked in ${INPUT_DIR} for <SPECIES>_<SAMPLE>_hap{1,2}.pg_input.fasta"
+    echo "       Check that step 01 (01_break_unsupported_joins.sh) has"
     echo "       completed for at least one sample, and that REF_TAG matches."
     exit 1
 fi

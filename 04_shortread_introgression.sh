@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # SLURM JOB SUBMISSION: SHORT-READ MAPPING TO PANGENOME + INTROGRESSION
-# Step 02 — requires 01_pangenome_build.sh to have completed (consumes its
+# Step 04 — requires 03_pangenome_build.sh to have completed (consumes its
 # *.final.gfa pangenome graph).
 #
 # Pipeline:
@@ -43,7 +43,7 @@
 #       or "Outgroup"
 #
 # USAGE:
-#   sbatch 02_shortread_introgression.sh
+#   sbatch 04_shortread_introgression.sh
 # =============================================================================
 #SBATCH --job-name=grouse_introgression
 #SBATCH --output=logs/%x_%j.out
@@ -84,7 +84,7 @@ ASSEMBLY_MANIFEST="${SLURM_SUBMIT_DIR}/assembly_manifest.tsv"
 SHORTREAD_MANIFEST="${SLURM_SUBMIT_DIR}/shortread_manifest.tsv"
 
 PROJECT_DIR="${CLUSTER_SCRATCH}/GROUSE/grouse_asm"
-PANGENOME_DIR="${PROJECT_DIR}/pangenome"   # input: from 01_pangenome_build.sh
+PANGENOME_DIR="${PROJECT_DIR}/pangenome"   # input: from 03_pangenome_build.sh
 GRAPH_DIR="${PROJECT_DIR}/graph_index"
 MAP_DIR="${PROJECT_DIR}/mapped"
 CALL_DIR="${PROJECT_DIR}/called"
@@ -104,7 +104,7 @@ DINVESTIGATE_WINDOW="50,25"
 
 mkdir -p logs "$GRAPH_DIR" "$MAP_DIR" "$CALL_DIR" "$JOINT_DIR" "$INTROGRESSION_DIR"
 
-echo ">>> 02_shortread_introgression.sh"
+echo ">>> 04_shortread_introgression.sh"
 echo ">>> Node      : $(hostname)"
 echo ">>> CPUs      : ${THREADS}"
 echo ">>> Start time: $(date)"
@@ -121,7 +121,7 @@ fi
 GFA=$(find "$PANGENOME_DIR" -name "*.final.gfa" 2>/dev/null | head -n1)
 if [[ -z "$GFA" ]]; then
     echo "ERROR: No pangenome graph found in ${PANGENOME_DIR}"
-    echo "Run 01_pangenome_build.sh first."
+    echo "Run 03_pangenome_build.sh first."
     exit 1
 fi
 
@@ -208,7 +208,7 @@ echo ">>> Reference haplotype has ${N_REF_CONTIGS} contigs/paths for calling"
 if [[ "$N_REF_CONTIGS" -eq 0 ]]; then
     echo "ERROR: No paths found for REF_HAP_TAG=${REF_HAP_TAG} in the graph."
     echo "Check that this sample/haplotype was actually included when"
-    echo "01_pangenome_build.sh built the combined FASTA."
+    echo "03_pangenome_build.sh built the combined FASTA."
     exit 1
 fi
 
@@ -216,7 +216,7 @@ fi
 # STEP 2: Per-sample mapping (giraffe) -> coverage (pack) -> genotyping
 # (call, looped per reference contig, then concatenated). Parallelized
 # across samples with xargs -P (same pattern as the RepeatMasker loop in
-# 01_pangenome_build.sh).
+# 03_pangenome_build.sh).
 # =============================================================================
 process_sample() {
     local line="$1"
