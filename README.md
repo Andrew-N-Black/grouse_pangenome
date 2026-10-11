@@ -198,8 +198,11 @@ per species) and `introgression/dtrios_BBAA.txt` (genome-wide D).
 These were noted when the scripts were written and have not been re-verified
 against the current module stack:
 
-- `merqury` and `mosdepth` (step 02) are assumed to be Gautschi biocontainer
-  modules; step 02 stops at the start and names any that are missing.
+- `merqury` and `minimap2` (step 02) are Gautschi biocontainer modules; step 02
+  stops at the start and names any that are missing. Gautschi has **no mosdepth
+  module**, so step 02 uses the official static release binary (v0.3.14), cached
+  under `PROJECT_DIR/tools/`. Fetch it once on a login node, where there is
+  network access: `INSTALL_ONLY=true bash 02_assembly_qc_array.sh`.
 - `pggb`, `odgi`, `vg` and `dsuite` module availability varies by cluster. All
   four are also available via bioconda or as Singularity containers; `pggb`
   especially is often easier as a container.

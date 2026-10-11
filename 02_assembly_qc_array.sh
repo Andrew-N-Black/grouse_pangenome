@@ -32,6 +32,12 @@
 #   then: bash 02b_collate_qc.sh
 #
 # Resume-safe: each stage is skipped when its output exists.
+#
+# MOSDEPTH: Gautschi has no mosdepth module, so if none is on PATH the script
+# uses (and, once, downloads) the official static release binary into
+# ${ASM_DIR}/tools/mosdepth-<version>/. Do the download on a LOGIN node first,
+# since compute nodes may have no outbound network:
+#   INSTALL_ONLY=true bash 02_assembly_qc_array.sh
 # =============================================================================
 #SBATCH --job-name=pg02_asm_qc
 #SBATCH --output=logs/%x_%A_%a.out
@@ -81,6 +87,11 @@ KEEP_BAM="${KEEP_BAM:-false}"       # keep the read-to-assembly BAM afterwards?
 FCS_ADAPTOR_SCRIPT="${FCS_ADAPTOR_SCRIPT:-}"   # path to run_fcsadaptor.sh
 FCS_ADAPTOR_SIF="${FCS_ADAPTOR_SIF:-}"         # path to fcs-adaptor.sif
 
+# Static mosdepth release binary, used when no module provides mosdepth.
+MOSDEPTH_VERSION="0.3.14"
+MOSDEPTH_DIR="${ASM_DIR}/tools/mosdepth-${MOSDEPTH_VERSION}"
+MOSDEPTH_URL="https://github.com/brentp/mosdepth/releases/download/v${MOSDEPTH_VERSION}/mosdepth"
+
 THREADS="${SLURM_CPUS_PER_TASK:-8}"
 
 # =============================================================================
@@ -92,24 +103,53 @@ module load biocontainers  >/dev/null 2>&1 || true
 module load samtools/1.22.1 >/dev/null 2>&1 || true
 module load minimap2       >/dev/null 2>&1 || true
 module load merqury        >/dev/null 2>&1 || true
-module load mosdepth       >/dev/null 2>&1 || true
+module load mosdepth       >/dev/null 2>&1 || true   # absent on Gautschi; see below
 set -u
 unset LD_PRELOAD    # RCAC XALT tracker; can kill subshells on some nodes
 
+# ---- mosdepth: module if present, else the cached static binary, else fetch it
+if command -v mosdepth >/dev/null 2>&1; then
+    MOSDEPTH="$(command -v mosdepth)"
+else
+    MOSDEPTH="${MOSDEPTH_DIR}/mosdepth"
+    if [[ ! -x "$MOSDEPTH" ]]; then
+        echo ">>> mosdepth not found — downloading static v${MOSDEPTH_VERSION} to ${MOSDEPTH_DIR}"
+        mkdir -p "$MOSDEPTH_DIR"
+        if command -v wget >/dev/null 2>&1; then
+            wget -q -O "${MOSDEPTH}.part" "$MOSDEPTH_URL" || rm -f "${MOSDEPTH}.part"
+        else
+            curl -fsSL -o "${MOSDEPTH}.part" "$MOSDEPTH_URL" || rm -f "${MOSDEPTH}.part"
+        fi
+        if [[ -s "${MOSDEPTH}.part" ]]; then
+            chmod +x "${MOSDEPTH}.part" && mv "${MOSDEPTH}.part" "$MOSDEPTH"
+        fi
+    fi
+    if [[ ! -x "$MOSDEPTH" ]] || ! "$MOSDEPTH" --version >/dev/null 2>&1; then
+        echo "ERROR: could not obtain a working mosdepth at ${MOSDEPTH}"
+        echo "       On a login node run:  INSTALL_ONLY=true bash 02_assembly_qc_array.sh"
+        echo "       or download ${MOSDEPTH_URL} there yourself and chmod +x it."
+        exit 1
+    fi
+fi
+if [[ "${INSTALL_ONLY:-false}" == true ]]; then
+    echo ">>> mosdepth ready: ${MOSDEPTH} ($("$MOSDEPTH" --version 2>&1 | head -1))"
+    exit 0
+fi
+
 MISSING=()
-for B in samtools minimap2 meryl merqury.sh mosdepth; do
+for B in samtools minimap2 meryl merqury.sh; do
     command -v "$B" >/dev/null 2>&1 || MISSING+=("$B")
 done
 if (( ${#MISSING[@]} )); then
     echo "ERROR: not on PATH after module load: ${MISSING[*]}"
-    echo "       check names with:  ml spider merqury ; ml spider mosdepth"
+    echo "       check names with:  ml spider merqury ; ml spider minimap2"
     exit 1
 fi
 echo ">>> samtools $(command -v samtools)"
 echo ">>> minimap2 $(minimap2 --version 2>/dev/null || true)"
 echo ">>> meryl    $(command -v meryl)"
 echo ">>> merqury  $(command -v merqury.sh)"
-echo ">>> mosdepth $(mosdepth --version 2>/dev/null || true)"
+echo ">>> mosdepth ${MOSDEPTH} ($("$MOSDEPTH" --version 2>&1 | head -1 || true))"
 
 # =============================================================================
 # SAMPLE FOR THIS TASK
@@ -217,7 +257,7 @@ else
     # -n: no per-base output; -x: fast mode; MAPQ 0 kept on purpose — reads
     # that cannot choose between two copies are exactly the false-duplication
     # signal, and dropping them would hide it.
-    mosdepth -n -x -t 4 --by "$WINDOW" "$MD" "$BAM"
+    "$MOSDEPTH" -n -x -t 4 --by "$WINDOW" "$MD" "$BAM"
 fi
 
 FLAGS="${WORK}/${SAMPLE}.depth_flags.bed"
