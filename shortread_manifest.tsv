@@ -8,5 +8,61 @@
 # samples (e.g. chicken/Gallus gallus resequencing) used to polarize the
 # D-statistics. At least one Outgroup sample is required.
 sample_id	species	fastq_r1	fastq_r2
-# EXAMPLE_pop_sample	STGR	/path/to/EXAMPLE_R1.fastq.gz	/path/to/EXAMPLE_R2.fastq.gz
-# EXAMPLE_outgroup_sample	Outgroup	/path/to/EXAMPLE_outgroup_R1.fastq.gz	/path/to/EXAMPLE_outgroup_R2.fastq.gz
+F5431	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5431_S30_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5431_S30_R2_001.fastq.gz
+F5432	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5432_S31_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5432_S31_R2_001.fastq.gz
+F5433	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5433_S32_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5433_S32_R2_001.fastq.gz
+F5435	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5435_S33_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5435_S33_R2_001.fastq.gz
+F5436	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5436_S34_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5436_S34_R2_001.fastq.gz
+F5585	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5585_S23_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5585_S23_R2_001.fastq.gz
+F5586	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5586_S24_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5586_S24_R2_001.fastq.gz
+F5590	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5590_S18_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5590_S18_R2_001.fastq.gz
+F5591	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5591_S19_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5591_S19_R2_001.fastq.gz
+F5592	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5592_S20_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5592_S20_R2_001.fastq.gz
+F5593	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5593_S21_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5593_S21_R2_001.fastq.gz
+F5594	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5594_S22_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5594_S22_R2_001.fastq.gz
+F5595	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5595_S72_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5595_S72_R2_001.fastq.gz
+F5596	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5596_S73_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5596_S73_R2_001.fastq.gz
+F5597	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5597_S74_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5597_S74_R2_001.fastq.gz
+F5598	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5598_S75_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5598_S75_R2_001.fastq.gz
+F5607	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5607_S25_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5607_S25_R2_001.fastq.gz
+F5610	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5610_S26_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5610_S26_R2_001.fastq.gz
+F5621	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5621_S35_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5621_S35_R2_001.fastq.gz
+F5623	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5623_S36_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5623_S36_R2_001.fastq.gz
+F5624	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5624_S37_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5624_S37_R2_001.fastq.gz
+F5625	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5625_S38_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5625_S38_R2_001.fastq.gz
+F5626	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5626_S39_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5626_S39_R2_001.fastq.gz
+F5627	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5627_S27_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5627_S27_R2_001.fastq.gz
+F5628	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5628_S28_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5628_S28_R2_001.fastq.gz
+F5629	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5629_S29_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5629_S29_R2_001.fastq.gz
+F5630	GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5630_S40_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5630_S40_R2_001.fastq.gz
+F5437	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5437_S57_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5437_S57_R2_001.fastq.gz
+F5438	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5438_S58_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5438_S58_R2_001.fastq.gz
+F5439	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5439_S59_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5439_S59_R2_001.fastq.gz
+F5440	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5440_S65_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5440_S65_R2_001.fastq.gz
+F5441	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5441_S60_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5441_S60_R2_001.fastq.gz
+F5442	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5442_S61_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5442_S61_R2_001.fastq.gz
+F5443	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5443_S62_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5443_S62_R2_001.fastq.gz
+F5444	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5444_S63_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5444_S63_R2_001.fastq.gz
+F5445	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5445_S64_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5445_S64_R2_001.fastq.gz
+F5446	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5446_S68_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5446_S68_R2_001.fastq.gz
+F5447	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5447_S69_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5447_S69_R2_001.fastq.gz
+F5448	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5448_S56_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5448_S56_R2_001.fastq.gz
+F5449	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5449_S66_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5449_S66_R2_001.fastq.gz
+F5450	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5450_S67_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5450_S67_R2_001.fastq.gz
+F5451	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5451_S53_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5451_S53_R2_001.fastq.gz
+F5452	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5452_S54_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5452_S54_R2_001.fastq.gz
+F5453	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5453_S55_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5453_S55_R2_001.fastq.gz
+F5454	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5454_S50_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5454_S50_R2_001.fastq.gz
+F5455	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5455_S51_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5455_S51_R2_001.fastq.gz
+F5456	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5456_S52_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5456_S52_R2_001.fastq.gz
+F5458	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5458_S47_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5458_S47_R2_001.fastq.gz
+F5462	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5462_S48_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5462_S48_R2_001.fastq.gz
+F5472	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5472_S41_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5472_S41_R2_001.fastq.gz
+F5476	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5476_S45_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5476_S45_R2_001.fastq.gz
+F5479	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5479_S43_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5479_S43_R2_001.fastq.gz
+F5481	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5481_S44_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5481_S44_R2_001.fastq.gz
+F5487	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5487_S46_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5487_S46_R2_001.fastq.gz
+F5493	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5493_S49_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5493_S49_R2_001.fastq.gz
+F5527	STGR	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5527_S42_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5527_S42_R2_001.fastq.gz
+F5434	STGR / GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5434_S70_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5434_S70_R2_001.fastq.gz
+F5622	STGR / GRPC	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5622_S71_R1_001.fastq.gz	/scratch/gautschi/blackan/GROUSE/grouse_asm/raw/Shotgun/F5622_S71_R2_001.fastq.gz
