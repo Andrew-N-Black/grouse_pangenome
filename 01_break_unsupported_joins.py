@@ -40,6 +40,14 @@ OUTPUTS (in --out-dir)
     summary.tsv           per haplotype: sequences/bp in and out
     The unplaced_short FASTA from step 09 is not touched or copied.
 
+JOINS ON THE REFERENCE'S UNPLACED SCAFFOLDS
+    RagTag also concatenated grouse scaffolds that align to the same UNPLACED
+    ptarmigan scaffold (NW_ accessions); step 09 named those objects
+    scaffold_N. Step 13 scored joins on chr_* sequences only, so these joins
+    were never tested — and they rest on the weakest evidence RagTag has (an
+    unplaced, often repetitive reference scaffold). By default they are all
+    cut, verdict 'untested_unplaced'. --keep-unplaced-joins leaves them.
+
 MODES (--break)
     unsupported              default: cut joins step 13 called unsupported
     unsupported,ambiguous    also cut joins it could not call either way
@@ -308,6 +316,9 @@ def main():
     ap.add_argument("--break", dest="brk", default="unsupported",
                     help="comma list of verdicts to cut, or 'all' (default: unsupported)")
     ap.add_argument("--only", default=None, help="process only this prefix, e.g. GRPC_F5595_hap1")
+    ap.add_argument("--keep-unplaced-joins", action="store_true",
+                    help="do NOT cut joins inside scaffold_N objects (RagTag placements on the "
+                         "reference's unplaced scaffolds), which step 13 never scored")
     ap.add_argument("--dry-run", action="store_true", help="report the plan, write nothing")
     args = ap.parse_args()
 
@@ -400,6 +411,31 @@ def main():
             sys.exit("ERROR: %d join(s) selected for cutting could not be placed; "
                      "nothing written." % unmatched)
 
+        # joins step 13 never saw: inside objects RagTag built on the
+        # reference's unplaced scaffolds (named scaffold_N, not chr_*)
+        seen = {(p, r[chrom_col]) for p, (_h, rows) in tables.items()
+                for r in rows if len(r) > chrom_col}
+        n_unpl = 0
+        for prefix, h in hap.items():
+            for chrom, gaps in h["chrom_gaps"].items():
+                if chrom.startswith("chr_") or (prefix, chrom) in seen or not gaps:
+                    continue
+                if args.keep_unplaced_joins:
+                    n_unpl += len(gaps)
+                    continue
+                for gi, _b, _e in gaps:
+                    cuts[prefix].setdefault(chrom, {})[gi] = ("untested_unplaced", [])
+                    n_unpl += 1
+        print(">>> joins inside reference-unplaced placements (never scored): %d — %s"
+              % (n_unpl, "kept" if args.keep_unplaced_joins else "cut"))
+        n_unscored_chr = sum(1 for prefix, h in hap.items()
+                             for chrom, gaps in h["chrom_gaps"].items()
+                             if chrom.startswith("chr_") and (prefix, chrom) not in seen
+                             for _ in gaps)
+        if n_unscored_chr:
+            print("  warn: %d join(s) on chr_* sequences have no row in the joins tables "
+                  "(not cut)" % n_unscored_chr)
+
     # ---- pass 3: cut and write ----------------------------------------------
     if not args.dry_run:
         os.makedirs(args.out_dir, exist_ok=True)
@@ -418,7 +454,10 @@ def main():
         hcuts = cuts.get(prefix, {})
         ncut = sum(len(v) for v in hcuts.values())
         tot_cuts += ncut
-        label = ", ".join("%s x%d" % (c, len(v)) for c, v in sorted(hcuts.items())) or "none"
+        lab_chr = ", ".join("%s x%d" % (c, len(v)) for c, v in sorted(hcuts.items())
+                            if c.startswith("chr_"))
+        n_up = sum(len(v) for c, v in hcuts.items() if not c.startswith("chr_"))
+        label = (lab_chr or "none") + ("  (+%d unplaced)" % n_up if n_up else "")
         print("  %-22s cuts: %s" % (prefix, label))
         if args.dry_run:
             continue

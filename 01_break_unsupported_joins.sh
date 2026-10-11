@@ -54,6 +54,9 @@ W_LOG="${FINAL_DIR}/W_relabel_log.tsv"
 OUT_DIR="${PG_WORK}/pangenome_inputs"
 
 BREAK="${BREAK:-unsupported}"
+# Joins RagTag made on the reference's UNPLACED scaffolds (objects named
+# scaffold_N) were never scored by step 13. true = cut them all (default).
+CUT_UNPLACED="${CUT_UNPLACED:-true}"
 DRY_RUN="${DRY_RUN:-false}"
 
 SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
@@ -85,8 +88,10 @@ ARGS=(--final-dir "$FINAL_DIR" --ragtag-dir "$RAGTAG_DIR" --out-dir "$OUT_DIR"
       --break "$BREAK" --w-log "$W_LOG")
 [[ "$BREAK" != "all" ]] && ARGS+=(--joins-dir "$JOINS_DIR")
 [[ -n "${ONLY:-}" ]]     && ARGS+=(--only "$ONLY")
+[[ "$CUT_UNPLACED" == true ]] || ARGS+=(--keep-unplaced-joins)
 
 echo ">>> break mode: ${BREAK}"
+echo ">>> cut joins on unplaced placements: ${CUT_UNPLACED}"
 echo ">>> input     : ${FINAL_DIR}"
 echo ">>> output    : ${OUT_DIR}"
 
