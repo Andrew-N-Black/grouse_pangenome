@@ -33,9 +33,10 @@
 #
 # Resume-safe: each stage is skipped when its output exists.
 #
-# MOSDEPTH: Gautschi has no mosdepth module, so if none is on PATH the script
-# uses (and, once, downloads) the official static release binary into
-# ${ASM_DIR}/tools/mosdepth-<version>/. Do the download on a LOGIN node first,
+# MOSDEPTH / MERYL: Gautschi has no mosdepth module, and its merqury module
+# does not put meryl on PATH. For either tool missing from the modules the
+# script uses (and, once, downloads) the official release binary into
+# ${ASM_DIR}/tools/<tool>-<version>/. Do the download on a LOGIN node first,
 # since compute nodes may have no outbound network:
 #   INSTALL_ONLY=true bash 02_assembly_qc_array.sh
 # =============================================================================
@@ -92,6 +93,11 @@ MOSDEPTH_VERSION="0.3.14"
 MOSDEPTH_DIR="${ASM_DIR}/tools/mosdepth-${MOSDEPTH_VERSION}"
 MOSDEPTH_URL="https://github.com/brentp/mosdepth/releases/download/v${MOSDEPTH_VERSION}/mosdepth"
 
+# meryl release binary, used when no module provides meryl.
+MERYL_VERSION="1.4.1"
+MERYL_DIR="${ASM_DIR}/tools/meryl-${MERYL_VERSION}"
+MERYL_URL="https://github.com/marbl/meryl/releases/download/v${MERYL_VERSION}/meryl-${MERYL_VERSION}.Linux-amd64.tar.xz"
+
 THREADS="${SLURM_CPUS_PER_TASK:-8}"
 
 # =============================================================================
@@ -103,6 +109,7 @@ module load biocontainers  >/dev/null 2>&1 || true
 module load samtools/1.22.1 >/dev/null 2>&1 || true
 module load minimap2       >/dev/null 2>&1 || true
 module load merqury        >/dev/null 2>&1 || true
+module load meryl          >/dev/null 2>&1 || true   # may not exist; see below
 module load mosdepth       >/dev/null 2>&1 || true   # absent on Gautschi; see below
 set -u
 unset LD_PRELOAD    # RCAC XALT tracker; can kill subshells on some nodes
@@ -131,13 +138,44 @@ else
         exit 1
     fi
 fi
+# ---- meryl: module if present, else the cached release binary, else fetch it
+if command -v meryl >/dev/null 2>&1; then
+    MERYL="$(command -v meryl)"
+else
+    MERYL="${MERYL_DIR}/bin/meryl"
+    if [[ ! -x "$MERYL" ]]; then
+        echo ">>> meryl not found — downloading v${MERYL_VERSION} to ${MERYL_DIR}"
+        mkdir -p "$MERYL_DIR"
+        TARBALL="${MERYL_DIR}/meryl.tar.xz"
+        if command -v wget >/dev/null 2>&1; then
+            wget -q -O "${TARBALL}.part" "$MERYL_URL" || rm -f "${TARBALL}.part"
+        else
+            curl -fsSL -o "${TARBALL}.part" "$MERYL_URL" || rm -f "${TARBALL}.part"
+        fi
+        if [[ -s "${TARBALL}.part" ]]; then
+            # the archive holds meryl-<ver>/bin/... ; flatten into MERYL_DIR
+            tar -xJf "${TARBALL}.part" -C "$MERYL_DIR" --strip-components=1 && rm -f "${TARBALL}.part"
+        fi
+    fi
+    if [[ ! -x "$MERYL" ]] || ! "$MERYL" --version >/dev/null 2>&1; then
+        echo "ERROR: could not obtain a working meryl at ${MERYL}"
+        echo "       On a login node run:  INSTALL_ONLY=true bash 02_assembly_qc_array.sh"
+        echo "       or unpack ${MERYL_URL} into ${MERYL_DIR} yourself."
+        exit 1
+    fi
+    # merqury.sh calls meryl itself; make this one visible to it too
+    export PATH="${MERYL_DIR}/bin:${PATH}"
+fi
+
 if [[ "${INSTALL_ONLY:-false}" == true ]]; then
     echo ">>> mosdepth ready: ${MOSDEPTH} ($("$MOSDEPTH" --version 2>&1 | head -1))"
+    echo ">>> meryl ready   : ${MERYL} ($("$MERYL" --version 2>&1 | head -1))"
+    echo ">>> merqury.sh    : $(command -v merqury.sh || echo 'NOT FOUND — check: ml spider merqury')"
     exit 0
 fi
 
 MISSING=()
-for B in samtools minimap2 meryl merqury.sh; do
+for B in samtools minimap2 merqury.sh; do
     command -v "$B" >/dev/null 2>&1 || MISSING+=("$B")
 done
 if (( ${#MISSING[@]} )); then
@@ -147,7 +185,7 @@ if (( ${#MISSING[@]} )); then
 fi
 echo ">>> samtools $(command -v samtools)"
 echo ">>> minimap2 $(minimap2 --version 2>/dev/null || true)"
-echo ">>> meryl    $(command -v meryl)"
+echo ">>> meryl    ${MERYL} ($("$MERYL" --version 2>&1 | head -1 || true))"
 echo ">>> merqury  $(command -v merqury.sh)"
 echo ">>> mosdepth ${MOSDEPTH} ($("$MOSDEPTH" --version 2>&1 | head -1 || true))"
 
@@ -216,7 +254,7 @@ if [[ -d "$DB" && -e "${DB}/merylIndex" ]]; then
 else
     echo ">>> [2] meryl count k=${K}"
     rm -rf "$DB"
-    meryl count k="$K" threads="$THREADS" memory="$MERYL_MEM" "${READS[@]}" output "$DB"
+    "$MERYL" count k="$K" threads="$THREADS" memory="$MERYL_MEM" "${READS[@]}" output "$DB"
 fi
 
 # =============================================================================
