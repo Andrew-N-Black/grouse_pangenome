@@ -57,6 +57,8 @@ two chromosomes), so this is not a formality.
 | 01 | [`01_break_unsupported_joins.sh`](01_break_unsupported_joins.sh) (+ [`.py`](01_break_unsupported_joins.py)) | Cuts every RagTag join that the assembly repo's Hi-C join-support step called `unsupported`, removing its 100 bp gap, and writes one graph-input FASTA per haplotype. Before cutting it proves the AGP coordinates still match each FASTA (object length; the cut gap must be all N) and finds the joins table's position column from the data; any mismatch stops the run. A cut chromosome becomes `<chrom>_p1`, `<chrom>_p2`, …; `breaks.tsv`, `pieces.tsv` and `summary.tsv` record every cut and the bp accounting. Joins RagTag made on the reference's *unplaced* scaffolds (objects named `scaffold_N`) were never scored by the join-support step and are cut too (`CUT_UNPLACED=false` keeps them). `BREAK=all` returns every chromosome to its yahs scaffolds. | single job, < 1 h |
 | 02 | [`02_assembly_qc_array.sh`](02_assembly_qc_array.sh) | Per sample, on step 01's FASTAs: Merqury (k = 21 HiFi k-mers: QV, completeness, copy-number spectra); HiFi depth with reads mapped to hap1 + hap2 together, flagging 100 kb windows below 0.5× or above 1.5× the haplotype median to a BED; optional NCBI FCS-adaptor. | array, one task per sample |
 | 02b | [`02b_collate_qc.sh`](02b_collate_qc.sh) | One table, one row per haplotype, with a `REVIEW` column (QV < 40; completeness > 5 points below the panel median; > 5% of the haplotype in low- or high-depth windows). Triage thresholds, not pass/fail. | login node, seconds |
+| 02c | [`02c_qc_report_table.sh`](02c_qc_report_table.sh) | Report table: per-haplotype **and combined hap1 + hap2** Merqury QV and k-mer completeness plus depth, panel ranges, flags, and every spectra-cn plot copied to `pangenome_qc/summary/spectra_cn/`. | login node, seconds |
+| 02d | [`02d_plot_qc_report.R`](02d_plot_qc_report.R) | Figure from 02c's table (USFWS report Fig. S8): completeness, QV and median HiFi depth per bird, W-bearing haplotypes open. | local R |
 | 03 | [`03_pangenome_build.sh`](03_pangenome_build.sh) | Renames every haplotype to PanSN (`species.sample#hap#contig`), concatenates them, and builds one PGGB graph. Then: `odgi` graph stats and per-haplotype path lengths, `panacus` core/accessory growth by species, de novo RepeatModeler library per species → RepeatMasker on all 46 haplotypes, and a Python pass that joins genome length + Liftoff gene counts + TE content into per-haplotype and per-species tables. | single job, 64 cpu, 500 G, 14 d |
 | 04 | [`04_shortread_introgression.sh`](04_shortread_introgression.sh) | Converts the graph to GBZ + giraffe indexes, then per short-read sample: `vg giraffe` → `vg pack` → `vg call` per reference contig → concatenate. Merges to a joint VCF with `bcftools`, then `Dsuite Dtrios` for genome-wide ABBA-BABA D-statistics and `Dsuite Dinvestigate` for windowed D/f_d on the trio the data supports. | single job, 64 cpu, 250 G, 10 d |
 
@@ -71,6 +73,7 @@ sbatch 01_break_unsupported_joins.sh
 N=$(grep -v '^#' assembly_manifest.tsv | tail -n +2 | grep -c .)
 sbatch --array=0-$((N-1))%6 02_assembly_qc_array.sh
 bash 02b_collate_qc.sh
+bash 02c_qc_report_table.sh      # report table + spectra-cn plots; plot locally with 02d_plot_qc_report.R
 # manual review of flagged regions, then:
 sbatch 03_pangenome_build.sh
 # then, once the graph exists:
@@ -175,6 +178,7 @@ pangenome_inputs/       <SP>_<S>_<H>.pg_input.fasta (+.fai), breaks.tsv,
 pangenome_qc/<SAMPLE>/  Merqury (QV, completeness, spectra-cn), depth summary,
                         depth_flags.bed, optional fcs_adaptor/                  (02)
 pangenome_qc/qc_summary.tsv   one row per haplotype, with REVIEW reasons       (02b)
+pangenome_qc/summary/         report table (+ hap1+hap2 rows), flags, spectra-cn  (02c)
 pangenome/              combined_haplotypes.fa.gz, PGGB graph (*.final.gfa/.og)  (03)
 te_annotation/          RepeatModeler libraries, per-haplotype RepeatMasker      (03)
 comparison/             graph summary, path lengths, per-haplotype and
