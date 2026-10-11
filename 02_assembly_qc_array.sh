@@ -93,8 +93,10 @@ MOSDEPTH_VERSION="0.3.14"
 MOSDEPTH_DIR="${ASM_DIR}/tools/mosdepth-${MOSDEPTH_VERSION}"
 MOSDEPTH_URL="https://github.com/brentp/mosdepth/releases/download/v${MOSDEPTH_VERSION}/mosdepth"
 
-# meryl release binary, used when no module provides meryl.
-MERYL_VERSION="1.4.1"
+# meryl release binary, used when no module provides meryl. Pinned to 1.3 to
+# match merqury/1.3, so the k-mer database is written by the same meryl
+# version merqury expects to read.
+MERYL_VERSION="1.3"
 MERYL_DIR="${ASM_DIR}/tools/meryl-${MERYL_VERSION}"
 MERYL_URL="https://github.com/marbl/meryl/releases/download/v${MERYL_VERSION}/meryl-${MERYL_VERSION}.Linux-amd64.tar.xz"
 
@@ -108,7 +110,7 @@ module unload anaconda >/dev/null 2>&1 || true
 module load biocontainers  >/dev/null 2>&1 || true
 module load samtools/1.22.1 >/dev/null 2>&1 || true
 module load minimap2       >/dev/null 2>&1 || true
-module load merqury        >/dev/null 2>&1 || true
+module load merqury/1.3    >/dev/null 2>&1 || true   # pinned: the version on Gautschi
 module load meryl          >/dev/null 2>&1 || true   # may not exist; see below
 module load mosdepth       >/dev/null 2>&1 || true   # absent on Gautschi; see below
 set -u

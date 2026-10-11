@@ -201,7 +201,7 @@ against the current module stack:
 - `merqury` and `minimap2` (step 02) are Gautschi biocontainer modules; step 02
   stops at the start and names any that are missing. Gautschi has **no mosdepth
   module** and its merqury module does not expose `meryl`, so step 02 uses the
-  official release binaries (mosdepth v0.3.14, meryl v1.4.1), cached under
+  official release binaries (mosdepth v0.3.14; meryl v1.3, matching merqury/1.3), cached under
   `PROJECT_DIR/tools/`. Fetch it once on a login node, where there is
   network access: `INSTALL_ONLY=true bash 02_assembly_qc_array.sh`.
 - `pggb`, `odgi`, `vg` and `dsuite` module availability varies by cluster. All
