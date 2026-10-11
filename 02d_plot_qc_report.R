@@ -27,9 +27,9 @@ shapes  <- c(hap1 = 16, hap2 = 17, hap1_W = 1, hap2_W = 2, both = 18)
 panel <- function(dd, var, xlab, show_y = TRUE, show_strip = FALSE) {
   ggplot(dd, aes(x = .data[[var]], y = sample)) +
     geom_line(aes(group = sample, colour = species), linewidth = 0.4, alpha = 0.5) +
-    geom_point(aes(colour = species, shape = pt), size = 2.2, stroke = 0.9) +
-    scale_shape_manual(values = shapes, limits = names(shapes), breaks = c("hap1", "hap2", "hap1_W", "both"),
-                       labels = c("hap1", "hap2", "W-bearing (open)", "hap1 + hap2"), name = NULL) +
+    geom_point(aes(colour = species, shape = pt), size = 2.2, stroke = 0.9, show.legend = TRUE) +
+    scale_shape_manual(values = shapes, limits = names(shapes), breaks = c("hap1", "hap2", "hap1_W", "hap2_W", "both"),
+                       labels = c("hap1", "hap2", "hap1, W-bearing", "hap2, W-bearing", "hap1 + hap2"), name = NULL) +
     scale_colour_manual(values = sp_cols, guide = "none") +
     facet_grid(species ~ ., scales = "free_y", space = "free_y") +
     labs(x = xlab, y = NULL) +
@@ -43,10 +43,13 @@ panel <- function(dd, var, xlab, show_y = TRUE, show_strip = FALSE) {
 }
 
 pA <- panel(d, "completeness_pct", "k-mer completeness (%)") + labs(tag = "A")
-pB <- panel(d, "QV", "Consensus quality (QV)", show_y = FALSE) + labs(tag = "B")
+# Only panel A carries the shape legend. ggplot2 >= 3.5 drops legend keys for
+# levels a panel does not plot (panel C has no "hap1 + hap2"), so per-panel
+# legends differ and patchwork cannot merge them into one.
+pB <- panel(d, "QV", "Consensus quality (QV)", show_y = FALSE) + labs(tag = "B") + guides(shape = "none")
 h  <- d[d$level == "haplotype" & !is.na(d$median_depth), ]
 has_depth <- nrow(h) > 0
-if (has_depth) pC <- panel(h, "median_depth", "Median HiFi depth (x)", show_y = FALSE, show_strip = TRUE) + labs(tag = "C")
+if (has_depth) pC <- panel(h, "median_depth", "Median HiFi depth (x)", show_y = FALSE, show_strip = TRUE) + labs(tag = "C") + guides(shape = "none")
 
 if (requireNamespace("patchwork", quietly = TRUE)) {
   library(patchwork)
