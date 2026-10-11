@@ -428,13 +428,15 @@ def main():
                     n_unpl += 1
         print(">>> joins inside reference-unplaced placements (never scored): %d — %s"
               % (n_unpl, "kept" if args.keep_unplaced_joins else "cut"))
-        n_unscored_chr = sum(1 for prefix, h in hap.items()
-                             for chrom, gaps in h["chrom_gaps"].items()
-                             if chrom.startswith("chr_") and (prefix, chrom) not in seen
-                             for _ in gaps)
-        if n_unscored_chr:
+        unscored_chr = [(prefix, chrom, b, e) for prefix, h in hap.items()
+                        for chrom, gaps in h["chrom_gaps"].items()
+                        if chrom.startswith("chr_") and (prefix, chrom) not in seen
+                        for _gi, b, e in gaps]
+        if unscored_chr:
             print("  warn: %d join(s) on chr_* sequences have no row in the joins tables "
-                  "(not cut)" % n_unscored_chr)
+                  "(not cut):" % len(unscored_chr))
+            for prefix, chrom, b, e in unscored_chr:
+                print("        %s %s gap %d-%d" % (prefix, chrom, b, e))
 
     # ---- pass 3: cut and write ----------------------------------------------
     if not args.dry_run:
