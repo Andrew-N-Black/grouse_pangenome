@@ -170,6 +170,13 @@ PANACUS_BIN="${PROJECT_DIR}/panacus-${PANACUS_VERSION}/bin/panacus"
 # genus Tympanuchus. See https://pggb.readthedocs.io/en/latest/rst/essential_parameters.html
 PGGB_MIN_IDENTITY=90
 PGGB_SEGMENT_LEN="5k"
+# Extra pggb options for one job, e.g. for a very large chromosome:
+#   PGGB_EXTRA="-B 2000000"   smaller seqwish transitive-closure batches (less
+#                             memory, slower; default 10,000,000 bp)
+#   PGGB_EXTRA="--resume"     reuse finished stage outputs. pggb writes each
+#                             stage in place, so first delete the file of the
+#                             stage that was running when the job died.
+PGGB_EXTRA="${PGGB_EXTRA:-}"
 
 THREADS="${SLURM_CPUS_PER_TASK:-1}"
 # Concurrency for the per-genome RepeatMasker loop (each call still gets
@@ -367,7 +374,8 @@ else
         -n "$N_HAPS" \
         -p "$PGGB_MIN_IDENTITY" \
         -s "$PGGB_SEGMENT_LEN" \
-        -t "$THREADS"
+        -t "$THREADS" \
+        ${PGGB_EXTRA:-}
 fi
 
 GFA=$(find "$PANGENOME_DIR" -maxdepth 1 -name "*.final.gfa" 2>/dev/null | head -n1)
