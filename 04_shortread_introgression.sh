@@ -81,7 +81,7 @@ APPTAINER_BIN="$(command -v apptainer || command -v singularity || true)"
 export APPTAINERENV_LD_PRELOAD="" SINGULARITYENV_LD_PRELOAD=""
 if ! command -v vg >/dev/null 2>&1; then
     [[ -n "$APPTAINER_BIN" && -s "$VG_SIF" ]] || { echo "ERROR: no vg on PATH and no ${VG_SIF} (run accessory/pull_containers.sh)"; exit 1; }
-    vg() { "$APPTAINER_BIN" exec --bind "${CLUSTER_SCRATCH}" "$VG_SIF" vg "$@"; }
+    vg() { "$APPTAINER_BIN" exec --cleanenv --bind "${CLUSTER_SCRATCH}" "$VG_SIF" vg "$@"; }
     export -f vg; export APPTAINER_BIN VG_SIF CLUSTER_SCRATCH
 fi
 

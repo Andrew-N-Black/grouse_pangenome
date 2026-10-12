@@ -134,7 +134,9 @@ PGGB_SIF="${PGGB_SIF:-${CONTAINER_DIR}/pggb.sif}"        # pggb, odgi, bgzip, sa
 TETOOLS_SIF="${TETOOLS_SIF:-${CONTAINER_DIR}/tetools.sif}"   # RepeatModeler, RepeatMasker
 APPTAINER_BIN="$(command -v apptainer || command -v singularity || true)"
 export APPTAINERENV_LD_PRELOAD="" SINGULARITYENV_LD_PRELOAD=""
-cx() { local sif="$1"; shift; "$APPTAINER_BIN" exec --bind "${CLUSTER_SCRATCH}" "$sif" "$@"; }
+# --cleanenv: the host shell exports wrapper functions (pggb, odgi, bgzip, cx); without it they
+# leak into the container, so pggb's own internal odgi/bgzip calls would try to re-launch apptainer.
+cx() { local sif="$1"; shift; "$APPTAINER_BIN" exec --cleanenv --bind "${CLUSTER_SCRATCH}" "$sif" "$@"; }
 use_tool() {   # use_tool <command> <image>: define a wrapper if <command> is not on PATH
     local t="$1" sif="$2"
     command -v "$t" >/dev/null 2>&1 && return 0
