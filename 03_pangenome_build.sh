@@ -282,7 +282,8 @@ fi
 echo ">>> Step 1: Collecting phased assemblies -> ${COMBINED_FASTA}${CHROM:+ (chromosome ${CHROM} only)}"
 
 sanitize() {
-    echo "$1" | tr -c 'A-Za-z0-9_-' '_'
+    # printf, not echo: echo's trailing newline would become a trailing '_'
+    printf '%s' "$1" | tr -c 'A-Za-z0-9_-' '_'
 }
 
 N_HAPS=0
@@ -310,7 +311,8 @@ for LINE in "${MANIFEST_ROWS[@]}"; do
 
         # CHROM set: keep only that chromosome (and its step-01 pieces, <chrom>_pN);
         # CHROM=unplaced: keep every sequence not named chr_*.
-        awk -v pre="${PANSN_SAMPLE}#${HAP}" -v chrom="$CHROM" '
+        # PanSN haplotype field must be an integer (hap1 -> 1) or pggb warns
+        awk -v pre="${PANSN_SAMPLE}#${HAP#hap}" -v chrom="$CHROM" '
             /^>/ { split($0, a, " "); name = substr(a[1], 2); base = name; sub(/_p[0-9]+$/, "", base)
                    keep = (chrom == "") || (chrom == "unplaced" ? base !~ /^chr_/ : base == chrom)
                    if (keep) { print ">" pre "#" name; n++ }
@@ -405,13 +407,13 @@ odgi stats -i "$OG" -S > "${COMPARE_DIR}/pangenome_graph_summary.yaml"
 # `odgi paths -H -D '#'` prints a header line, then columns:
 #   group.name  path.name  path.length  path.step.count  [node.1 ... node.N]
 # group.name is everything before the first '#' in path.name — for our
-# PanSN names (species.sample#hap#contig) that's "species.sample".
+# PanSN names (species.sample#1|2#contig) that's "species.sample".
 odgi paths -i "$OG" -H -D '#' -t "$THREADS" > "${COMPARE_DIR}/path_lengths_raw.tsv"
 echo -e "species\tsample\thaplotype\tcontig\tpath_length_bp" > "${COMPARE_DIR}/genome_length_by_haplotype.tsv"
 awk -F'\t' 'NR>1 {
     split($1, sp, ".")          # $1=group.name=species.sample -> sp[1]=species sp[2]=sample
     split($2, p, "#")           # $2=path.name=species.sample#hap#contig -> p[2]=hap p[3]=contig
-    print sp[1]"\t"sp[2]"\t"p[2]"\t"p[3]"\t"$3
+    print sp[1]"\t"sp[2]"\thap"p[2]"\t"p[3]"\t"$3   # PanSN hap "1" -> "hap1" to match manifest-built keys
 }' "${COMPARE_DIR}/path_lengths_raw.tsv" >> "${COMPARE_DIR}/genome_length_by_haplotype.tsv"
 
 echo "  Wrote ${COMPARE_DIR}/genome_length_by_haplotype.tsv"

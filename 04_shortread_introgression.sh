@@ -140,7 +140,8 @@ if [[ -z "$GFA" ]]; then
 fi
 
 sanitize() {
-    echo "$1" | tr -c 'A-Za-z0-9_-' '_'
+    # printf, not echo: echo's trailing newline would become a trailing '_'
+    printf '%s' "$1" | tr -c 'A-Za-z0-9_-' '_'
 }
 
 mapfile -t ASM_ROWS < <(grep -v '^#' "$ASSEMBLY_MANIFEST" | tail -n +2)
@@ -168,7 +169,7 @@ REF_SPECIES="${REF_SPECIES//[[:space:]]/}"   # manifest species may carry stray 
 # nothing. So keep the two apart: select the sample, then filter to the
 # haplotype by name. REF_HAP_TAG is only used for display and error messages.
 REF_SAMPLE_TAG="$(sanitize "$REF_SPECIES").$(sanitize "$REF_SAMPLE")"
-REF_HAP="hap1"
+REF_HAP="1"          # PanSN haplotype field is an integer (step 03 writes hap1 as #1#)
 REF_HAP_TAG="${REF_SAMPLE_TAG}#${REF_HAP}"
 echo ">>> Reference haplotype for VCF coordinates: ${REF_HAP_TAG}"
 
