@@ -428,18 +428,32 @@ echo "  Wrote ${COMPARE_DIR}/genome_length_by_haplotype.tsv"
 echo ">>> Step 5: Core/accessory pangenome growth by species (panacus)"
 
 odgi paths -i "$OG" -L -t "$THREADS" > "${COMPARE_DIR}/path_names.txt"
-awk -F'#' '{ split($1, g, "."); print $0"\t"g[1] }' "${COMPARE_DIR}/path_names.txt" \
-    > "${COMPARE_DIR}/panacus_groups.tsv"
+# Growth curves per haplotype (-H merges a haplotype's pieces, e.g. chr_2_p1
+# and chr_2_p2), counted in bp, for quorum 0 (pangenome: in any haplotype) and
+# quorum 1 (core: in every haplotype). One table for all 46 haplotypes and one
+# per species. Per-species curves use a copy of the GFA that keeps only that
+# species' P-lines: segments no kept path visits have coverage 0 and drop out.
+# (panacus -s/--subset was tried and does not restrict the haplotype groups;
+# the earlier two-column -s file made panacus panic, exit 101.)
+cut -d'.' -f1 "${COMPARE_DIR}/path_names.txt" | sort -u > "${COMPARE_DIR}/panacus_species.txt"
+rm -f "${COMPARE_DIR}/panacus_groups.tsv" "${COMPARE_DIR}/pangenome_histgrowth_by_species.tsv"
 
 set +e
-"$PANACUS_BIN" histgrowth -t "$THREADS" -s "${COMPARE_DIR}/panacus_groups.tsv" "$GFA" \
-    > "${COMPARE_DIR}/pangenome_histgrowth_by_species.tsv"
-PANACUS_STATUS=$?
+PANACUS_STATUS=0
+"$PANACUS_BIN" histgrowth -t "$THREADS" -c bp -l 1,1 -q 0,1 -H "$GFA" \
+    > "${COMPARE_DIR}/pangenome_histgrowth_all.tsv" || PANACUS_STATUS=$?
+while read -r SP; do
+    SP_GFA="${COMPARE_DIR}/.${SP}.paths_only.gfa"
+    awk -F'\t' -v sp="${SP}." '$1 != "P" || index($2, sp) == 1' "$GFA" > "$SP_GFA"
+    "$PANACUS_BIN" histgrowth -t "$THREADS" -c bp -l 1,1 -q 0,1 -H "$SP_GFA" \
+        > "${COMPARE_DIR}/pangenome_histgrowth_${SP}.tsv" || PANACUS_STATUS=$?
+    rm -f "$SP_GFA"
+done < "${COMPARE_DIR}/panacus_species.txt"
 set -e
 
 if [[ "$PANACUS_STATUS" -ne 0 ]]; then
     echo "  WARNING: panacus histgrowth failed (exit ${PANACUS_STATUS})."
-    echo "  Check the -s grouping file format against '${PANACUS_BIN} histgrowth --help'"
+    echo "  See '${PANACUS_BIN} histgrowth --help'"
     echo "  and rerun manually — this does not block the TE/gene comparisons below."
 fi
 
@@ -647,5 +661,5 @@ echo ">>> Pangenome + comparative analysis complete."
 echo "    Pangenome graph        : ${GFA}"
 echo "    Per-haplotype summary  : ${COMPARE_DIR}/per_haplotype_summary.tsv"
 echo "    Species comparison     : ${COMPARE_DIR}/species_comparison_summary.tsv"
-echo "    Core/accessory growth  : ${COMPARE_DIR}/pangenome_histgrowth_by_species.tsv"
+echo "    Core/accessory growth  : ${COMPARE_DIR}/pangenome_histgrowth_{all,<SPECIES>}.tsv"
 echo ">>> End time: $(date)"
