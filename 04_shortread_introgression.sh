@@ -148,6 +148,7 @@ fi
 # graph without guessing a sample ID. Override REF_HAP_TAG below if you'd
 # rather anchor calling on a specific higher-quality individual.
 IFS=$'\t' read -r REF_SAMPLE REF_SPECIES _ _ _ _ <<< "${ASM_ROWS[0]}"
+REF_SPECIES="${REF_SPECIES//[[:space:]]/}"   # manifest species may carry stray spaces ("LEPC ")
 # PanSN splits a path name into sample#haplotype#contig, and `vg paths -S`
 # selects on the SAMPLE field alone — passing "sample#hap1" to it matches
 # nothing. So keep the two apart: select the sample, then filter to the

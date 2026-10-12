@@ -218,6 +218,7 @@ mapfile -t MANIFEST_ROWS < <(grep -v '^#' "$MANIFEST" | tail -n +2)
 
 for LINE in "${MANIFEST_ROWS[@]}"; do
     IFS=$'\t' read -r SAMPLE SPECIES _ _ _ _ <<< "$LINE"
+    SPECIES="${SPECIES//[[:space:]]/}"   # manifest species may carry stray spaces ("LEPC ")
     [[ -z "$SAMPLE" ]] && continue
 
     SAMPLE_TAG=$(sanitize "$SAMPLE")
@@ -352,6 +353,7 @@ declare -A SEEN_SPECIES
 
 for LINE in "${MANIFEST_ROWS[@]}"; do
     IFS=$'\t' read -r SAMPLE SPECIES _ _ _ _ <<< "$LINE"
+    SPECIES="${SPECIES//[[:space:]]/}"   # manifest species may carry stray spaces ("LEPC ")
     [[ -z "$SAMPLE" ]] && continue
     [[ -n "${SEEN_SPECIES[$SPECIES]:-}" ]] && continue
 
@@ -384,6 +386,7 @@ RM_JOBLIST="${TE_DIR}/repeatmasker_jobs.txt"
 
 for LINE in "${MANIFEST_ROWS[@]}"; do
     IFS=$'\t' read -r SAMPLE SPECIES _ _ _ _ <<< "$LINE"
+    SPECIES="${SPECIES//[[:space:]]/}"   # manifest species may carry stray spaces ("LEPC ")
     [[ -z "$SAMPLE" ]] && continue
     for HAP in hap1 hap2; do
         ASSEMBLY="${FINAL_DIR}/${SPECIES}_${SAMPLE}_${HAP}.pseudo_chr.fasta"

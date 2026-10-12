@@ -201,6 +201,7 @@ mapfile -t ROWS < <(grep -v '^#' "$MANIFEST" | tail -n +2 | grep -v '^[[:space:]
 LINE="${ROWS[$SLURM_ARRAY_TASK_ID]:-}"
 [[ -n "$LINE" ]] || { echo "ERROR: no manifest row ${SLURM_ARRAY_TASK_ID} (${#ROWS[@]} rows)"; exit 1; }
 IFS=$'\t' read -r SAMPLE SPECIES HIFI_BAMS _R1 _R2 _ONT <<< "$LINE"
+SPECIES="${SPECIES//[[:space:]]/}"   # manifest species may carry stray spaces ("LEPC ")
 
 H1=$(ls "${IN_DIR}"/*_"${SAMPLE}"_hap1.pg_input.fasta 2>/dev/null | head -1 || true)
 H2=$(ls "${IN_DIR}"/*_"${SAMPLE}"_hap2.pg_input.fasta 2>/dev/null | head -1 || true)
