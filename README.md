@@ -74,8 +74,13 @@ N=$(grep -v '^#' assembly_manifest.tsv | tail -n +2 | grep -c .)
 sbatch --array=0-$((N-1))%6 02_assembly_qc_array.sh
 bash 02b_collate_qc.sh
 bash 02c_qc_report_table.sh      # report table + spectra-cn plots; plot locally with 02d_plot_qc_report.R
-# manual review of flagged regions, then:
-sbatch 03_pangenome_build.sh
+bash accessory/pull_containers.sh  # once, login node: pggb/odgi, vg, RepeatMasker images (no Gautschi modules)
+# graph, per chromosome (recommended):
+bash 03_pangenome_build.sh list    # writes pangenome/chromosomes.txt and prints the array command
+CHROM=chr_20 sbatch --export=ALL -t 2-00:00:00 --mem=128G 03_pangenome_build.sh   # one-chromosome test
+sbatch --export=ALL,CHROM=array --array=0-<N-1>%8 -t 4-00:00:00 --mem=250G 03_pangenome_build.sh
+STAGE=summary sbatch --export=ALL -t 4-00:00:00 03_pangenome_build.sh   # merge graphs + TE/gene tables
+#   (or, whole genome in one job: sbatch 03_pangenome_build.sh)
 # then, once the graph exists:
 sbatch 04_shortread_introgression.sh
 ```
@@ -142,10 +147,19 @@ sample_id  species  fastq_r1  fastq_r2
 
 `species` must be one of `LEPC`, `GRPC`, `STGR`, or the literal `Outgroup`.
 
+Samples labelled `xxx` are mapped and genotyped but ignored by Dsuite; this is
+used for the two putative STGR × GRPC hybrids. LEPC are currently represented
+only by the 19 New Mexico birds of Objective 1 (allopatric Southern DPS; F10
+omitted as a first-degree relative): no high-depth LEPC from the LEPC–GRPC
+hybrid zone could be collected in 2026, and sequencing sympatric Kansas LEPC to
+~15–20× is the priority for testing introgression in the hybrid zone itself.
+The outgroup is Gunnison sage-grouse (*Centrocercus minimus*, PRJNA531321;
+`accessory/download_outgroup.sh`).
+
 **At least one `Outgroup` sample is required and step 04 refuses to run without
 one.** D-statistics need a fourth, more distantly related taxon to polarise
 ancestral versus derived alleles; without it, "quantify introgression" is not a
-defined computation. Chicken resequencing data is the obvious choice.
+defined computation.
 
 ---
 

@@ -70,12 +70,20 @@ set -euo pipefail
 unset LD_PRELOAD
 
 ml biocontainers
-ml vg          # module availability varies by cluster — bioconda has `vg`
-                # (conda-forge/bioconda channels) if no module exists, same
-                # pattern used for yahs elsewhere in this pipeline
 ml samtools/1.22.1
 ml bcftools
-ml dsuite       # or build from https://github.com/millanek/Dsuite (make)
+ml dsuite/0.5.r44
+
+# vg has no module on Gautschi: use the Apptainer image from
+# accessory/pull_containers.sh unless a vg is already on PATH.
+VG_SIF="${VG_SIF:-${CLUSTER_SCRATCH}/GROUSE/grouse_asm/containers/vg.sif}"
+APPTAINER_BIN="$(command -v apptainer || command -v singularity || true)"
+export APPTAINERENV_LD_PRELOAD="" SINGULARITYENV_LD_PRELOAD=""
+if ! command -v vg >/dev/null 2>&1; then
+    [[ -n "$APPTAINER_BIN" && -s "$VG_SIF" ]] || { echo "ERROR: no vg on PATH and no ${VG_SIF} (run accessory/pull_containers.sh)"; exit 1; }
+    vg() { "$APPTAINER_BIN" exec --bind "${CLUSTER_SCRATCH}" "$VG_SIF" vg "$@"; }
+    export -f vg; export APPTAINER_BIN VG_SIF CLUSTER_SCRATCH
+fi
 
 # =============================================================================
 # USER-DEFINED VARIABLES
@@ -118,7 +126,13 @@ if [[ ! -f "$SHORTREAD_MANIFEST" ]]; then
     exit 1
 fi
 
-GFA=$(find "$PANGENOME_DIR" -name "*.final.gfa" 2>/dev/null | head -n1)
+# Per-chromosome builds (03 with CHROM=...) are merged by 03's STAGE=summary
+# into pangenome/merged/; a whole-genome build sits directly in pangenome/.
+if [[ -s "${PANGENOME_DIR}/merged/pangenome.final.gfa" ]]; then
+    GFA="${PANGENOME_DIR}/merged/pangenome.final.gfa"
+else
+    GFA=$(find "$PANGENOME_DIR" -maxdepth 1 -name "*.final.gfa" 2>/dev/null | head -n1)
+fi
 if [[ -z "$GFA" ]]; then
     echo "ERROR: No pangenome graph found in ${PANGENOME_DIR}"
     echo "Run 03_pangenome_build.sh first."

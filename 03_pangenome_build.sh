@@ -32,6 +32,27 @@
 # your assemblies are already RagTag-oriented against the same rock ptarmigan
 # reference, chromosome-level partitioning should work cleanly if needed.
 #
+# RUN MODES (all from the repo root)
+#   Whole genome, one job (original behaviour):
+#       sbatch 03_pangenome_build.sh
+#   Per chromosome (recommended; graphs are built independently per ptarmigan
+#   chromosome, which is valid because every haplotype is RagTag-oriented to
+#   the same reference, and pieces cut in step 01 keep their chromosome name):
+#       bash 03_pangenome_build.sh list            # writes pangenome/chromosomes.txt, prints the array command
+#       CHROM=chr_20 sbatch --export=ALL -t 2-00:00:00 --mem=128G 03_pangenome_build.sh   # one-chromosome test
+#       sbatch --export=ALL,CHROM=array --array=0-<N-1>%8 -t 4-00:00:00 --mem=250G 03_pangenome_build.sh
+#       STAGE=summary sbatch --export=ALL -t 4-00:00:00 03_pangenome_build.sh
+#   The summary stage merges the per-chromosome graphs into one
+#   (pangenome/merged/pangenome.final.{og,gfa}, used by step 04) and runs the
+#   genome-wide steps (graph stats, panacus, TE annotation, species tables).
+#   Per-chromosome jobs run steps 1-5 only, into pangenome/<CHROM>/ and
+#   comparison/<CHROM>/. CHROM=unplaced collects every sequence not named
+#   chr_* (unplaced scaffolds, relabelled male W pieces).
+#
+# SOFTWARE: Gautschi has no pggb, odgi, vg or RepeatMasker module. Each tool is
+#   used from a module when one is on PATH, otherwise from an Apptainer image
+#   in ${PROJECT_DIR}/containers (fetch once with accessory/pull_containers.sh).
+#
 # A NOTE ON CHROMOSOME NAMES
 #   The assemblies carry the ptarmigan reference's own chromosome numbering,
 #   which is a DESCENDING-LENGTH RANK, not homology to the chicken karyotype:
@@ -70,21 +91,15 @@ unset LD_PRELOAD
 
 ml biocontainers
 ml samtools/1.22.1
-ml pggb        # bundles wfmash/seqwish/smoothxg/odgi — module availability
-                # varies by cluster; pggb is also distributed as a Singularity
-                # container (https://github.com/pangenome/pggb#singularity)
-ml odgi
-# No panacus module and no cargo/Rust toolchain on this cluster, so it's
-# fetched below as a precompiled static (musl) binary — no compilation
-# needed. See PANACUS_BIN setup further down.
-ml repeatmodeler
-ml repeatmasker
+ml repeatmodeler/2.0.3 2>/dev/null || true   # bioconda build also ships RepeatMasker/BuildDatabase
 ml python
+# No panacus module and no cargo/Rust toolchain on this cluster, so it's
+# fetched below as a precompiled static (musl) binary. See PANACUS_BIN.
 
 # =============================================================================
 # USER-DEFINED VARIABLES
 # =============================================================================
-MANIFEST="${SLURM_SUBMIT_DIR}/assembly_manifest.tsv"
+MANIFEST="${SLURM_SUBMIT_DIR:-$PWD}/assembly_manifest.tsv"
 
 # Same PROJECT_DIR as the assembly pipeline — this reads its output in place.
 PROJECT_DIR="${CLUSTER_SCRATCH}/GROUSE/grouse_asm"
@@ -102,6 +117,46 @@ PANGENOME_DIR="${PROJECT_DIR}/pangenome"
 TE_DIR="${PROJECT_DIR}/te_annotation"
 COMPARE_DIR="${PROJECT_DIR}/comparison"
 
+# ---- run mode -----------------------------------------------------------------
+#   CHROM=""        whole genome in one graph (default)
+#   CHROM=chr_N     one chromosome; CHROM=unplaced: everything not named chr_*
+#   CHROM=array     take the chromosome from pangenome/chromosomes.txt by
+#                   SLURM_ARRAY_TASK_ID (write it first with: bash $0 list)
+#   STAGE=summary   merge per-chromosome graphs, then genome-wide steps 4-7
+CHROM="${CHROM:-}"
+STAGE="${STAGE:-}"
+MODE="${1:-}"
+CHROM_LIST="${PANGENOME_DIR}/chromosomes.txt"
+
+# ---- tools: module if available, else Apptainer image ---------------------------
+CONTAINER_DIR="${PROJECT_DIR}/containers"
+PGGB_SIF="${PGGB_SIF:-${CONTAINER_DIR}/pggb.sif}"        # pggb, odgi, bgzip, samtools
+TETOOLS_SIF="${TETOOLS_SIF:-${CONTAINER_DIR}/tetools.sif}"   # RepeatModeler, RepeatMasker
+APPTAINER_BIN="$(command -v apptainer || command -v singularity || true)"
+export APPTAINERENV_LD_PRELOAD="" SINGULARITYENV_LD_PRELOAD=""
+cx() { local sif="$1"; shift; "$APPTAINER_BIN" exec --bind "${CLUSTER_SCRATCH}" "$sif" "$@"; }
+use_tool() {   # use_tool <command> <image>: define a wrapper if <command> is not on PATH
+    local t="$1" sif="$2"
+    command -v "$t" >/dev/null 2>&1 && return 0
+    if [[ -z "$APPTAINER_BIN" || ! -s "$sif" ]]; then
+        echo "ERROR: '$t' is not on PATH and image ${sif} is missing."
+        echo "       Run accessory/pull_containers.sh on a login node first."; exit 1
+    fi
+    eval "${t}() { cx \"${sif}\" ${t} \"\$@\"; }"; export -f "$t"
+}
+export -f cx; export APPTAINER_BIN CLUSTER_SCRATCH
+
+if [[ "$CHROM" == "array" ]]; then
+    [[ -s "$CHROM_LIST" && -n "${SLURM_ARRAY_TASK_ID:-}" ]] \
+        || { echo "ERROR: CHROM=array needs ${CHROM_LIST} (bash $0 list) and an --array job"; exit 1; }
+    CHROM=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "$CHROM_LIST")
+    [[ -n "$CHROM" ]] || { echo "ERROR: no chromosome at line $((SLURM_ARRAY_TASK_ID + 1)) of ${CHROM_LIST}"; exit 1; }
+fi
+if [[ -n "$CHROM" ]]; then
+    PANGENOME_DIR="${PANGENOME_DIR}/${CHROM}"
+    COMPARE_DIR="${COMPARE_DIR}/${CHROM}"
+fi
+
 COMBINED_FASTA="${PANGENOME_DIR}/combined_haplotypes.fa"
 
 # panacus — precompiled static (musl) binary, cached under PROJECT_DIR so
@@ -114,13 +169,32 @@ PANACUS_BIN="${PROJECT_DIR}/panacus-${PANACUS_VERSION}/bin/panacus"
 PGGB_MIN_IDENTITY=90
 PGGB_SEGMENT_LEN="5k"
 
-THREADS=$SLURM_CPUS_PER_TASK
+THREADS="${SLURM_CPUS_PER_TASK:-1}"
 # Concurrency for the per-genome RepeatMasker loop (each call still gets
 # multiple threads via -pa); tune alongside THREADS.
 TE_PARALLEL_JOBS=4
 TE_THREADS_PER_JOB=$(( THREADS / TE_PARALLEL_JOBS > 0 ? THREADS / TE_PARALLEL_JOBS : 1 ))
 
 mkdir -p logs "$PANGENOME_DIR" "$TE_DIR" "$COMPARE_DIR"
+
+# ---- `bash 03_pangenome_build.sh list`: chromosome list for the array ----------
+if [[ "$MODE" == "list" ]]; then
+    ls "${INPUT_DIR}"/*.pg_input.fasta.fai >/dev/null 2>&1 \
+        || { echo "ERROR: no ${INPUT_DIR}/*.pg_input.fasta.fai (run step 01)"; exit 1; }
+    cat "${INPUT_DIR}"/*.pg_input.fasta.fai | cut -f1 | sed -E 's/_p[0-9]+$//' \
+        | grep '^chr_' | sort -u -V > "$CHROM_LIST"
+    echo "unplaced" >> "$CHROM_LIST"
+    N=$(wc -l < "$CHROM_LIST")
+    echo "Wrote ${CHROM_LIST} (${N} partitions):"; tr '\n' ' ' < "$CHROM_LIST"; echo
+    echo "Submit: sbatch --export=ALL,CHROM=array --array=0-$((N-1))%8 -t 4-00:00:00 --mem=250G 03_pangenome_build.sh"
+    exit 0
+fi
+
+for t in pggb odgi bgzip; do use_tool "$t" "$PGGB_SIF"; done
+if [[ -z "$CHROM" ]]; then
+    for t in BuildDatabase RepeatModeler RepeatMasker; do use_tool "$t" "$TETOOLS_SIF"; done
+fi
+echo ">>> Mode: ${CHROM:+chromosome }${CHROM:-${STAGE:-whole genome}}"
 
 # =============================================================================
 # INSTALL panacus (once — skipped on reruns if already present)
@@ -205,9 +279,7 @@ fi
 # Species and sample are read from the manifest (not parsed back out of
 # filenames) since either field may itself contain underscores.
 # =============================================================================
-echo ">>> Step 1: Collecting phased assemblies -> ${COMBINED_FASTA}"
-
-> "$COMBINED_FASTA"
+echo ">>> Step 1: Collecting phased assemblies -> ${COMBINED_FASTA}${CHROM:+ (chromosome ${CHROM} only)}"
 
 sanitize() {
     echo "$1" | tr -c 'A-Za-z0-9_-' '_'
@@ -215,6 +287,9 @@ sanitize() {
 
 N_HAPS=0
 mapfile -t MANIFEST_ROWS < <(grep -v '^#' "$MANIFEST" | tail -n +2)
+
+if [[ "$STAGE" != "summary" ]]; then
+> "$COMBINED_FASTA"
 
 for LINE in "${MANIFEST_ROWS[@]}"; do
     IFS=$'\t' read -r SAMPLE SPECIES _ _ _ _ <<< "$LINE"
@@ -233,16 +308,24 @@ for LINE in "${MANIFEST_ROWS[@]}"; do
             continue
         fi
 
-        awk -v pre="${PANSN_SAMPLE}#${HAP}" '
-            /^>/ { split($0, a, " "); name = substr(a[1], 2); print ">" pre "#" name; next }
-            { print }
-        ' "$ASSEMBLY" >> "$COMBINED_FASTA"
-
-        N_HAPS=$((N_HAPS + 1))
+        # CHROM set: keep only that chromosome (and its step-01 pieces, <chrom>_pN);
+        # CHROM=unplaced: keep every sequence not named chr_*.
+        awk -v pre="${PANSN_SAMPLE}#${HAP}" -v chrom="$CHROM" '
+            /^>/ { split($0, a, " "); name = substr(a[1], 2); base = name; sub(/_p[0-9]+$/, "", base)
+                   keep = (chrom == "") || (chrom == "unplaced" ? base !~ /^chr_/ : base == chrom)
+                   if (keep) { print ">" pre "#" name; n++ }
+                   next }
+            keep { print }
+            END { exit (n > 0 ? 0 : 3) }
+        ' "$ASSEMBLY" >> "$COMBINED_FASTA" && N_HAPS=$((N_HAPS + 1)) || true
     done
 done
 
 echo "  Collected ${N_HAPS} haplotype assemblies"
+
+if [[ -n "$CHROM" ]]; then
+    echo "  (${N_HAPS} haplotypes carry ${CHROM}; e.g. chr_W is present only in females)"
+fi
 
 if [[ "$N_HAPS" -lt 2 ]]; then
     echo "ERROR: fewer than 2 haplotype assemblies found — nothing to build a pangenome from."
@@ -269,7 +352,7 @@ samtools faidx "${COMBINED_FASTA}.gz"
 # =============================================================================
 echo ">>> Step 3: pggb pangenome construction (n=${N_HAPS} haplotypes)"
 
-EXISTING_GFA=$(find "$PANGENOME_DIR" -name "*.final.gfa" 2>/dev/null | head -n1)
+EXISTING_GFA=$(find "$PANGENOME_DIR" -maxdepth 1 -name "*.final.gfa" 2>/dev/null | head -n1)
 
 if [[ -n "$EXISTING_GFA" ]]; then
     echo "  Existing pangenome graph found — skipping pggb run: ${EXISTING_GFA}"
@@ -283,8 +366,8 @@ else
         -t "$THREADS"
 fi
 
-GFA=$(find "$PANGENOME_DIR" -name "*.final.gfa" 2>/dev/null | head -n1)
-OG=$(find "$PANGENOME_DIR" -name "*.final.og" 2>/dev/null | head -n1)
+GFA=$(find "$PANGENOME_DIR" -maxdepth 1 -name "*.final.gfa" 2>/dev/null | head -n1)
+OG=$(find "$PANGENOME_DIR" -maxdepth 1 -name "*.final.og" 2>/dev/null | head -n1)
 
 if [[ -z "$GFA" || -z "$OG" ]]; then
     echo "ERROR: pggb did not produce the expected *.final.gfa / *.final.og in ${PANGENOME_DIR}"
@@ -292,6 +375,25 @@ if [[ -z "$GFA" || -z "$OG" ]]; then
 fi
 
 echo "  Pangenome graph: ${GFA}"
+
+else
+# =============================================================================
+# STAGE=summary: merge the per-chromosome graphs into one graph
+# =============================================================================
+    echo ">>> Summary stage: merging per-chromosome graphs"
+    [[ -s "$CHROM_LIST" ]] || { echo "ERROR: ${CHROM_LIST} not found"; exit 1; }
+    MERGED_DIR="${PANGENOME_DIR}/merged"; mkdir -p "$MERGED_DIR"
+    OG_LIST="${MERGED_DIR}/graphs.txt"; > "$OG_LIST"; MISSING=0
+    while read -r C; do
+        G=$(find "${PANGENOME_DIR}/${C}" -maxdepth 1 -name "*.final.og" 2>/dev/null | head -n1)
+        if [[ -n "$G" ]]; then echo "$G" >> "$OG_LIST"; else echo "  MISSING graph for ${C}"; MISSING=$((MISSING+1)); fi
+    done < "$CHROM_LIST"
+    (( MISSING == 0 )) || { echo "ERROR: ${MISSING} chromosome graph(s) missing — rerun those array tasks first"; exit 1; }
+    OG="${MERGED_DIR}/pangenome.final.og"; GFA="${MERGED_DIR}/pangenome.final.gfa"
+    [[ -s "$OG" ]]  || odgi squeeze -f "$OG_LIST" -o "$OG" -t "$THREADS"
+    [[ -s "$GFA" ]] || odgi view -i "$OG" -g > "$GFA"
+    echo "  Merged graph: ${GFA} ($(wc -l < "$OG_LIST") chromosome graphs)"
+fi
 
 # =============================================================================
 # STEP 4: Graph-level summary + per-haplotype path (assembly) lengths
@@ -335,6 +437,14 @@ if [[ "$PANACUS_STATUS" -ne 0 ]]; then
     echo "  WARNING: panacus histgrowth failed (exit ${PANACUS_STATUS})."
     echo "  Check the -s grouping file format against '${PANACUS_BIN} histgrowth --help'"
     echo "  and rerun manually — this does not block the TE/gene comparisons below."
+fi
+
+if [[ -n "$CHROM" ]]; then
+    echo ""
+    echo ">>> Chromosome ${CHROM} done: graph ${GFA}"
+    echo "    TE/gene tables and the merged graph come from: STAGE=summary sbatch 03_pangenome_build.sh"
+    echo ">>> End time: $(date)"
+    exit 0
 fi
 
 # =============================================================================
@@ -405,6 +515,7 @@ run_repeatmasker() {
     RepeatMasker -pa "$TE_THREADS_PER_JOB" -lib "$MERGED_TE_LIB" -gff -dir "$outdir" "$assembly"
 }
 export -f run_repeatmasker sanitize
+declare -F RepeatMasker >/dev/null && export -f RepeatMasker
 export MERGED_TE_LIB TE_DIR TE_THREADS_PER_JOB
 
 xargs -a "$RM_JOBLIST" -I{} -P "$TE_PARALLEL_JOBS" bash -c 'run_repeatmasker "$@"' _ {}
