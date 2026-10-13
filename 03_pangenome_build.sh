@@ -123,6 +123,7 @@ COMPARE_DIR="${PROJECT_DIR}/comparison"
 #   CHROM=array     take the chromosome from pangenome/chromosomes.txt by
 #                   SLURM_ARRAY_TASK_ID (write it first with: bash $0 list)
 #   STAGE=summary   merge per-chromosome graphs, then genome-wide steps 4-7
+#   STAGE=te        TE annotation only (step 6); can run while the graphs build
 CHROM="${CHROM:-}"
 STAGE="${STAGE:-}"
 MODE="${1:-}"
@@ -298,6 +299,8 @@ sanitize() {
 N_HAPS=0
 mapfile -t MANIFEST_ROWS < <(grep -v '^#' "$MANIFEST" | tail -n +2)
 
+# STAGE=te skips the graph (steps 1-5) and runs only the TE annotation (step 6)
+if [[ "$STAGE" != "te" ]]; then
 if [[ "$STAGE" != "summary" ]]; then
 > "$COMBINED_FASTA"
 
@@ -465,6 +468,8 @@ if [[ "$PANACUS_STATUS" -ne 0 ]]; then
     echo "  and rerun manually — this does not block the TE/gene comparisons below."
 fi
 
+fi   # end of: STAGE != te
+
 if [[ -n "$CHROM" ]]; then
     echo ""
     echo ">>> Chromosome ${CHROM} done: graph ${GFA}"
@@ -504,8 +509,9 @@ for LINE in "${MANIFEST_ROWS[@]}"; do
     echo "  Building RepeatModeler library for ${SPECIES} (representative: ${SAMPLE})"
 
     if [[ ! -f "$FAMILIES_FA" ]]; then
-        BuildDatabase -name "$DB_NAME" "$REP_ASSEMBLY"
-        RepeatModeler -database "$DB_NAME" -threads "$THREADS" -LTRStruct
+        # run inside TE_DIR: RepeatModeler writes its RM_<pid>.<date> work folder to the cwd
+        ( cd "$TE_DIR" && BuildDatabase -name "$DB_NAME" "$REP_ASSEMBLY" \
+          && RepeatModeler -database "$DB_NAME" -threads "$THREADS" -LTRStruct )
     else
         echo "    Library already built — skipping"
     fi
@@ -545,6 +551,13 @@ declare -F RepeatMasker >/dev/null && export -f RepeatMasker
 export MERGED_TE_LIB TE_DIR TE_THREADS_PER_JOB
 
 xargs -a "$RM_JOBLIST" -I{} -P "$TE_PARALLEL_JOBS" bash -c 'run_repeatmasker "$@"' _ {}
+
+if [[ "$STAGE" == "te" ]]; then
+    echo ">>> TE stage done: libraries and RepeatMasker output in ${TE_DIR}"
+    echo "    STAGE=summary reuses them (finished species/haplotypes are skipped) and builds the tables."
+    echo ">>> End time: $(date)"
+    exit 0
+fi
 
 # =============================================================================
 # STEP 7: Summarize TE content and gene content (Liftoff) per haplotype,
