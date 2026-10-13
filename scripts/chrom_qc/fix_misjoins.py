@@ -11,8 +11,8 @@ chromosome that is also a length outlier. Each cut is snapped to the nearest run
 If no gap is close enough, the join is inside a contig (an assembly chimera): it is NOT
 cut and is written to manual_review.tsv with coordinates to check against Hi-C.
 
-Pieces keep the original name when they belong to the expected chromosome; pieces that
-belong elsewhere are named <true_chrom>_pN (first unused N in that haplotype), so
+Pieces that belong to the expected chromosome are re-joined in their original order
+(100-N gap) under the original name; pieces that belong elsewhere are named <true_chrom>_pN (first unused N in that haplotype), so
 downstream steps that group chr_10, chr_10_p1, chr_10_p2 together pick them up.
 
 Outputs (in --outdir):
@@ -172,16 +172,19 @@ def main():
                     if ov > 0: cnt[t] += ov
                 t = cnt.most_common(1)[0][0] if cnt else base_chrom(n)
                 pieces.append([ps, pe, t])
-            names, kept_orig = [], False
+            # expected-chromosome pieces are re-joined (in original order, 100-N gap) under the
+            # original name, so an off-target insertion in the middle is lifted out cleanly
+            names, groups = [], collections.OrderedDict()
             for ps, pe, t in pieces:
-                if t == base_chrom(n) and not kept_orig:
-                    nm = n; kept_orig = True
+                if t == base_chrom(n):
+                    nm = n
                 else:
                     k = 1
                     while f'{t}_p{k}' in used: k += 1
-                    nm = f'{t}_p{k}'
-                used.add(nm); names.append(nm)
-            pieces_for[n] = [(nm, ps, pe) for nm, (ps, pe, _) in zip(names, pieces)]
+                    nm = f'{t}_p{k}'; used.add(nm)
+                names.append(nm)
+                groups.setdefault(nm, []).append((ps, pe))
+            pieces_for[n] = list(groups.items())
             for i, ((gs, ge), brk) in enumerate(cuts):
                 cutlog.write(f'{h}\t{n}\t{brk}\t{gs}\t{ge}\t{abs((gs+ge)//2-brk)}\t{names[i]}\t{names[i+1]}\n'); n_cut += 1
 
@@ -193,8 +196,8 @@ def main():
             def flush(nm, buf):
                 if nm in pieces_for:
                     s = ''.join(buf)
-                    for pn, ps, pe in pieces_for[nm]:
-                        sub = s[ps:pe].strip('Nn')
+                    for pn, ranges in pieces_for[nm]:
+                        sub = ('N' * 100).join(s[ps:pe].strip('Nn') for ps, pe in ranges)
                         out.write(f'>{pn}\n')
                         for i in range(0, len(sub), 80): out.write(sub[i:i+80] + '\n')
             buf = []
