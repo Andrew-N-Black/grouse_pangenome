@@ -37,7 +37,7 @@ def hap_id(path):
     return b
 
 def read_fai(files, prefix, skip):
-    seqs = {}
+    seqs = {}                                       # (hap, seqname) -> length
     for f in files:
         h = hap_id(f)
         with open(f) as fh:
@@ -49,7 +49,7 @@ def read_fai(files, prefix, skip):
     return seqs
 
 def read_paf(files, min_mapq, min_len, prefix):
-    alns = collections.defaultdict(list)
+    alns = collections.defaultdict(list)            # (hap, qname) -> [(qs, qe, tchrom, strand)]
     for f in files:
         h = hap_id(f)
         with open(f) as fh:
@@ -84,10 +84,10 @@ def main():
     ap.add_argument('--fai', nargs='+', required=True)
     ap.add_argument('--out', default='chrom_qc.tsv')
     ap.add_argument('--chrom-prefix', default='chr')
-    ap.add_argument('--skip', default='chr_MT')
+    ap.add_argument('--skip', default='chr_MT', help='comma-separated chromosomes to ignore')
     ap.add_argument('--min-mapq', type=int, default=20)
     ap.add_argument('--min-aln', type=int, default=10000)
-    ap.add_argument('--min-block', type=int, default=1000000)
+    ap.add_argument('--min-block', type=int, default=1000000, help='aligned bp to another chromosome needed to call CHIMERA')
     ap.add_argument('--len-tol', type=float, default=0.15)
     ap.add_argument('--min-aln-frac', type=float, default=0.5)
     a = ap.parse_args()
@@ -97,6 +97,7 @@ def main():
     alns = read_paf(a.paf, a.min_mapq, a.min_aln, a.chrom_prefix)
     haps = sorted({h for h, _ in seqs})
 
+    # length screen on whole chromosomes (all _pN pieces summed)
     tot_len = collections.Counter()
     for (h, n), l in seqs.items():
         tot_len[(h, base_chrom(n))] += l
@@ -132,6 +133,15 @@ def main():
         rows.append([h, n, c, mb(L), mb(tot_len[(h, c)]), f"{ratio:.2f}", f"{tot/L:.2f}",
                      f"{per_t[c]/L:.2f}", top, f"{(rev_exp/per_t[c] if per_t[c] else 0):.2f}",
                      ostr or '-', ','.join(flags) or 'OK'])
+
+    present = collections.defaultdict(set)
+    for (h, c) in tot_len:
+        present[c].add(h)
+    for c in sorted(present):
+        if len(present[c]) >= 0.5 * len(haps):
+            for h in haps:
+                if h not in present[c]:
+                    rows.append([h, c, c, '0.00', '0.00', '0.00', '0.00', '0.00', 'NA', '0.00', '-', 'MISSING'])
 
     with open(a.out, 'w') as out:
         out.write('\t'.join(cols) + '\n')
