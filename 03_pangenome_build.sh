@@ -92,7 +92,7 @@ unset LD_PRELOAD
 ml biocontainers
 ml samtools/1.22.1
 ml repeatmodeler/2.0.3 2>/dev/null || true   # bioconda build also ships RepeatMasker/BuildDatabase
-ml python
+# (no python module: the system python3 is used)
 # No panacus module and no cargo/Rust toolchain on this cluster, so it's
 # fetched below as a precompiled static (musl) binary. See PANACUS_BIN.
 
@@ -511,7 +511,14 @@ for LINE in "${MANIFEST_ROWS[@]}"; do
     if [[ ! -f "$FAMILIES_FA" ]]; then
         # run inside TE_DIR: RepeatModeler writes its RM_<pid>.<date> work folder to the cwd
         ( cd "$TE_DIR" && BuildDatabase -name "$DB_NAME" "$REP_ASSEMBLY" \
-          && RepeatModeler -database "$DB_NAME" -threads "$THREADS" -LTRStruct )
+          && RM_HELP=$(RepeatModeler -help 2>&1 || true) \
+          && if [[ "$RM_HELP" == *"-threads"* ]]; then
+                 RepeatModeler -database "$DB_NAME" -threads "$THREADS" -LTRStruct
+             else
+                 # RepeatModeler < 2.0.4 (e.g. the repeatmodeler/2.0.3 module) has no -threads;
+                 # -pa N runs N parallel searches of ~4 threads each
+                 RepeatModeler -database "$DB_NAME" -pa $(( THREADS / 4 > 0 ? THREADS / 4 : 1 )) -LTRStruct
+             fi )
     else
         echo "    Library already built — skipping"
     fi
