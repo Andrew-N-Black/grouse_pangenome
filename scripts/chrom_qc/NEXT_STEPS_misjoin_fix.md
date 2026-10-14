@@ -58,6 +58,24 @@ Copy the chr_20 `*.viz*.png` and `*.lay*.png` to the laptop and compare with the
 If STGR F5457#1 still sits apart from the others, that is a graph problem, not an assembly
 problem: chrom_qc found its chr_20 normal.
 
+### A2b. Leave chr_MT out of the merged graph (2026-10-14)
+
+The hifiasm chr_MT sequences are multi-copy (20-50 kb). The mitogenomes were
+re-assembled separately with MitoHiFi (prairie_grouse `accessory_scripts/mitohifi_array.sh`
+and `mito_qc.sh`) and are kept out of the pangenome. The pangenome input FASTAs are not
+edited for this.
+
+Only once NO 03_pangenome_build array task is still pending or running, because the
+array reads `chromosomes.txt` by line number and removing a line shifts every later
+task onto the wrong chromosome:
+
+```bash
+squeue -u $USER -n grouse_pangenome,pg_chr_20,pg_chr_23,pg_chr_24,pg_chr_25,pg_chr_26,pg_chr_27,pg_chr_28,pg_chr_29,pg_chr_30   # must be empty
+cp $ASM/pangenome/chromosomes.txt $ASM/pangenome/chromosomes.with_MT.txt
+sed -i '/^chr_MT$/d' $ASM/pangenome/chromosomes.txt
+grep -c chr_MT $ASM/pangenome/chromosomes.txt      # expect 0
+```
+
 ### A3. Merge all per-chromosome graphs
 
 Wait until every chromosome graph is done (including the untouched ones from the original
