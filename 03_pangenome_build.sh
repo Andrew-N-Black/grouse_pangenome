@@ -135,6 +135,13 @@ PGGB_SIF="${PGGB_SIF:-${CONTAINER_DIR}/pggb.sif}"        # pggb, odgi, bgzip, sa
 TETOOLS_SIF="${TETOOLS_SIF:-${CONTAINER_DIR}/tetools.sif}"   # RepeatModeler, RepeatMasker
 APPTAINER_BIN="$(command -v apptainer || command -v singularity || true)"
 export APPTAINERENV_LD_PRELOAD="" SINGULARITYENV_LD_PRELOAD=""
+# seqwish's transitive closure sorts in worker threads whose default stack (2 MB) overflows on
+# the largest chromosomes ("thread '<unknown>' has overflowed its stack ... signal 6"; chr_2,
+# chr_3 and chr_5 failed this way at 190-330 GB, well below the memory limit). RUST_MIN_STACK
+# raises it; it is reserved virtual memory, not resident, so it does not count against --mem.
+# --cleanenv drops host variables, so it is passed into the container as APPTAINERENV_*.
+export RUST_MIN_STACK="${RUST_MIN_STACK:-1073741824}"     # 1 GiB per thread
+export APPTAINERENV_RUST_MIN_STACK="$RUST_MIN_STACK" SINGULARITYENV_RUST_MIN_STACK="$RUST_MIN_STACK"
 # --cleanenv: the host shell exports wrapper functions (pggb, odgi, bgzip, cx); without it they
 # leak into the container, so pggb's own internal odgi/bgzip calls would try to re-launch apptainer.
 cx() { local sif="$1"; shift; "$APPTAINER_BIN" exec --cleanenv --bind "${CLUSTER_SCRATCH}" "$sif" "$@"; }
