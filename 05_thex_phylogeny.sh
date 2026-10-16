@@ -87,7 +87,7 @@
 #   bash 05_thex_phylogeny.sh submit       # submits stages 2-5 as one dependency chain
 #   bash 05_thex_phylogeny.sh status       # progress counts
 #   Any stage can be (re)submitted alone, e.g.
-#     sbatch --export=ALL -c 128 --mem=240G -t 1-00:00:00 05_thex_phylogeny.sh prep
+#     sbatch -A fnrdewoody -p cpu --export=ALL -N 1 -c 128 -t 2-00:00:00 05_thex_phylogeny.sh prep
 #   Every stage is resume-safe: finished haplotypes, chromosomes and windows are skipped.
 #   Then copy work/thex_inputs/ to the laptop and run `thex` (see the end of this header).
 #
@@ -137,7 +137,13 @@ THEX_GIT="${THEX_GIT:-https://github.com/harris-2374/THEx.git}"   # THExBuilder 
 # ---- SLURM (Negishi: 128 cores, 256 GB per cpu node; ~2 GB per core) ----
 ACCOUNT="${ACCOUNT:-fnrdewoody}"
 PARTITION="${PARTITION:-cpu}"
-QOS="${QOS:-normal}"                                 # standby = 4 h limit, too short for prep/iqtree
+# Per-stage QOS. fnrdewoody has 320 cores and a long normal queue; standby uses idle
+# nodes (4 h limit, not charged to the account). The array stages are cut so each task fits
+# in 4 h, and every stage is resume-safe: a task killed at 4 h just needs resubmitting.
+PROJECT_QOS="${PROJECT_QOS:-standby}"
+PREP_QOS="${PREP_QOS:-normal}"                       # one long job: msa, windows, trimal, pw filter
+IQ_QOS="${IQ_QOS:-standby}"
+SUMMARY_QOS="${SUMMARY_QOS:-standby}"
 
 # ---- alignment ----
 REF_ID="${REF_ID:-}"                 # empty/Lmuta = ptarmigan (default); auto; or e.g. GRPC_F5596_hap1
@@ -168,8 +174,8 @@ PREP_CPUS="${PREP_CPUS:-128}"
 IQT_MODEL="${IQT_MODEL:-GTR+F+G4}"           # THEx's default GTR*H4 is several times slower
 IQT_BOOT="${IQT_BOOT:-1000}"                 # UFBoot; THEx reads the .contree
 IQT_THREADS="${IQT_THREADS:-2}"              # threads per IQ-TREE run
-IQ_ARRAY="${IQ_ARRAY:-4}"                    # nodes (array tasks) sharing the windows
-IQ_CPUS="${IQ_CPUS:-128}"                    # cores per array task
+IQ_ARRAY="${IQ_ARRAY:-40}"                   # array tasks sharing the windows (~280 windows each)
+IQ_CPUS="${IQ_CPUS:-64}"                     # cores per array task
 IQ_SEED="${IQ_SEED:-12345}"
 
 SPECIES="${SPECIES:-STGR,LEPC,GRPC}"
@@ -190,7 +196,18 @@ MODE="${1:-}"
 
 die()  { echo "ERROR: $*" >&2; exit 1; }
 log()  { echo "[$(date '+%F %T')] $*"; }
-sb()   { sbatch --parsable -A "$ACCOUNT" -p "$PARTITION" -q "$QOS" --export=ALL "$@"; }
+# sb QOS [sbatch options...]; standby jobs get its 4 h limit. Memory is never requested for
+# whole-node jobs: Negishi cannot give a node's nominal 256 GB (--mem=240G is refused), and
+# without --mem a job gets its cores' share of the node's memory.
+sb()   {
+    local q="$1"; shift
+    local a=() prev=""
+    for x in "$@"; do     # standby: replace the -t value with the 4 h maximum
+        if [[ "$prev" == -t && "$q" == standby ]]; then a+=("04:00:00"); else a+=("$x"); fi
+        prev="$x"
+    done
+    sbatch --parsable -A "$ACCOUNT" -p "$PARTITION" -q "$q" --export=ALL "${a[@]}"
+}
 use_env() {
     [[ -x "${ENV_PREFIX}/bin/thexb" ]] || die "THEx env not found at ${ENV_PREFIX}; run: bash $0 setup"
     export PATH="${ENV_PREFIX}/bin:${PATH}"
@@ -578,15 +595,24 @@ stage_submit() {
     stage_pick_ref
     local N; N=$(wc -l < "$NAMES_FILE")
     local J1 J2 J3 J4
-    J1=$(sb --array=0-$((N-1)) -c "$PROJECT_CPUS" --mem=$(( PROJECT_CPUS * 2 ))G -t 12:00:00 \
-            -J thex_project -o "${REPO_DIR}/logs/%x_%A_%a.out" "$SCRIPT" project)
-    J2=$(sb --dependency=afterok:"$J1" -N 1 -c "$PREP_CPUS" --mem=240G -t 2-00:00:00 \
-            -J thex_prep -o "${REPO_DIR}/logs/%x_%j.out" "$SCRIPT" prep)
-    J3=$(sb --dependency=afterok:"$J2" --array=0-$((IQ_ARRAY-1)) -N 1 -c "$IQ_CPUS" --mem=240G \
-            -t 4-00:00:00 -J thex_iqtree -o "${REPO_DIR}/logs/%x_%A_%a.out" "$SCRIPT" iqtree)
-    J4=$(sb --dependency=afterany:"$J3" -c 8 --mem=32G -t 12:00:00 \
-            -J thex_summary -o "${REPO_DIR}/logs/%x_%j.out" "$SCRIPT" summarize)
-    log "submitted: project $J1 ($N tasks) -> prep $J2 -> iqtree $J3 ($IQ_ARRAY nodes) -> summarize $J4"
+    if squeue -u "${USER:-$(id -un)}" -h -o '%j' 2>/dev/null | grep -q '^thex_'; then
+        die "thex_* jobs already queued (squeue -u ${USER:-$(id -un)}); scancel them or submit stages by hand"
+    fi
+    # Each sbatch is checked: a refused submission stops here and says which one.
+    J1=$(sb "$PROJECT_QOS" --array=0-$((N-1)) -c "$PROJECT_CPUS" --mem=$(( PROJECT_CPUS * 2 ))G -t 12:00:00 \
+            -J thex_project -o "${REPO_DIR}/logs/%x_%A_%a.out" "$SCRIPT" project) || die "project submission refused"
+    log "project  $J1 ($N tasks, $PROJECT_QOS)"
+    J2=$(sb "$PREP_QOS" --dependency=afterok:"$J1" -N 1 -c "$PREP_CPUS" -t 2-00:00:00 \
+            -J thex_prep -o "${REPO_DIR}/logs/%x_%j.out" "$SCRIPT" prep) || die "prep submission refused (project $J1 is queued)"
+    log "prep     $J2 ($PREP_QOS)"
+    J3=$(sb "$IQ_QOS" --dependency=afterok:"$J2" --array=0-$((IQ_ARRAY-1)) -N 1 -c "$IQ_CPUS" \
+            -t 2-00:00:00 -J thex_iqtree -o "${REPO_DIR}/logs/%x_%A_%a.out" "$SCRIPT" iqtree) || die "iqtree submission refused"
+    log "iqtree   $J3 ($IQ_ARRAY tasks x $IQ_CPUS cores, $IQ_QOS)"
+    J4=$(sb "$SUMMARY_QOS" --dependency=afterany:"$J3" -c 8 --mem=16G -t 12:00:00 \
+            -J thex_summary -o "${REPO_DIR}/logs/%x_%j.out" "$SCRIPT" summarize) || die "summary submission refused"
+    log "summary  $J4 ($SUMMARY_QOS)"
+    echo "Standby tasks killed at 4 h: resubmit that stage alone, e.g."
+    echo "  sbatch -A $ACCOUNT -p $PARTITION -q standby -t 04:00:00 --export=ALL --array=0-$((IQ_ARRAY-1)) -N 1 -c $IQ_CPUS -o logs/%x_%A_%a.out -J thex_iqtree $SCRIPT iqtree"
 }
 
 stage_status() {
