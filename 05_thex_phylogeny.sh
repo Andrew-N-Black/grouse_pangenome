@@ -119,7 +119,6 @@ IN_DIR="${PROJECT_DIR}/inputs/final_${REF_TAG}"     # copied assemblies + Liftof
 OUTGROUP_DIR="${PROJECT_DIR}/inputs/outgroup"        # copied ptarmigan FASTA + GFF
 WORK="${PROJECT_DIR}/work"
 ENV_PREFIX="${ENV_PREFIX:-${PROJECT_DIR}/envs/thex_env}"
-THEX_GIT="${THEX_GIT:-https://github.com/harris-2374/THEx.git}"   # THExBuilder source (pip)
 
 # ---- SLURM (Negishi: 128 cores, 256 GB per cpu node; ~2 GB per core) ----
 ACCOUNT="${ACCOUNT:-fnrdewoody}"
@@ -259,24 +258,11 @@ stage_setup() {
     command -v conda >/dev/null || die "no conda: try 'module avail conda anaconda'"
     export CONDA_PKGS_DIRS="${PROJECT_DIR}/envs/pkgs"   # keep the package cache off the home quota
     mkdir -p "$CONDA_PKGS_DIRS"
-    # The 'thex' package on the ajharris_2374 channel pins biopython=1.79 etc. without pinning
-    # python, so it no longer solves against current conda-forge. Instead: build the env from
-    # THEx's own pinned dependency list (envs/linux_osx_deps.yaml; the Dash viewer packages are
-    # left out, they are only needed on the laptop), then pip-install THExBuilder from GitHub
-    # with --no-deps so pip cannot change anything conda resolved.
-    if [[ ! -x "${ENV_PREFIX}/bin/python" ]]; then
-        rm -rf "$ENV_PREFIX"     # a failed solve can leave an empty prefix behind
+    if [[ ! -x "${ENV_PREFIX}/bin/thexb" ]]; then
         local solver; solver="$(command -v mamba || command -v conda)"
         log "creating ${ENV_PREFIX} with $(basename "$solver")"
-        "$solver" create -y -p "$ENV_PREFIX" --override-channels -c conda-forge -c bioconda \
-            --channel-priority flexible \
-            "python=3.9" "biopython=1.79" "pandas=1.2.4" "numpy<1.24" "openpyxl=3.0.7" \
-            "ete3=3.1.2" "p-tqdm=1.4.0" "pyfaidx=0.7.1" six pip git \
-            "iqtree=2.2.0.3" "trimal=1.4.1"
-    fi
-    if [[ ! -x "${ENV_PREFIX}/bin/thexb" ]]; then
-        log "installing THExBuilder from ${THEX_GIT}"
-        "${ENV_PREFIX}/bin/python" -m pip install --no-deps --no-cache-dir "git+${THEX_GIT}"
+        "$solver" create -y -p "$ENV_PREFIX" -c ajharris_2374 -c bioconda -c conda-forge \
+            thex iqtree trimal
     fi
     use_env
     log "thexb: $(thexb --version 2>&1 | tail -1)"
