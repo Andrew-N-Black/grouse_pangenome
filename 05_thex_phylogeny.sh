@@ -571,7 +571,8 @@ stage_iqtree() {
     local t="${SLURM_ARRAY_TASK_ID:-0}" n="${SLURM_ARRAY_TASK_COUNT:-$IQ_ARRAY}"
     local CPUS="${SLURM_CPUS_PER_TASK:-$IQ_CPUS}" P
     P=$(( CPUS / IQT_THREADS )); [[ $P -ge 1 ]] || P=1
-    [[ -s "${WORK}/iqtree_windows.txt" ]] || die "no window list; run the prep stage first"
+    [[ -e "${WORK}/iqtree_windows.txt" ]] || die "no window list; run the prep stage first"
+    [[ -s "${WORK}/iqtree_windows.txt" ]] || { log "window list is empty: nothing to run"; return 0; }
     mkdir -p "$IQ_DIR"
     local mine="${IQ_DIR}/task_${t}.windows"
     awk -v t="$t" -v n="$n" '(NR-1) % n == t' "${WORK}/iqtree_windows.txt" > "$mine"
