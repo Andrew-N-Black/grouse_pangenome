@@ -209,9 +209,10 @@ write_ids() {
     { cat "$IDS_FILE"; echo "$OUTGROUP_NAME"; } > "$NAMES_FILE"
 }
 
-outgroup_fasta() { ls "${OUTGROUP_DIR}/${OUTGROUP_ACC}"_*_genomic.fna 2>/dev/null | head -1; }
-outgroup_gff()   { ls "${OUTGROUP_DIR}/${OUTGROUP_ACC}"_*_genomic.gff 2>/dev/null | head -1; }
-outgroup_map()   { ls "${OUTGROUP_DIR}/${OUTGROUP_ACC}"_*.chr_map.tsv 2>/dev/null | head -1; }
+# '|| true': with pipefail, ls failing on a missing file would end the script silently
+outgroup_fasta() { ls "${OUTGROUP_DIR}/${OUTGROUP_ACC}"_*_genomic.fna 2>/dev/null | head -1 || true; }
+outgroup_gff()   { ls "${OUTGROUP_DIR}/${OUTGROUP_ACC}"_*_genomic.gff 2>/dev/null | head -1 || true; }
+outgroup_map()   { ls "${OUTGROUP_DIR}/${OUTGROUP_ACC}"_*.chr_map.tsv 2>/dev/null | head -1 || true; }
 OG_REF_FA="${OUTGROUP_DIR}/${OUTGROUP_NAME}.chr.fasta"     # ptarmigan renamed to chr_N
 OG_REF_GFF="${OUTGROUP_DIR}/${OUTGROUP_NAME}.chr.gff"
 
