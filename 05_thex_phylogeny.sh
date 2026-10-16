@@ -12,8 +12,8 @@
 #             ref/GCF_023343835.1_*_genomic.{fna,gff}  (rock ptarmigan)
 #        |  rsync (stage: transfer, Negishi login node)
 #        v
-#   Negishi   1. pick-ref   one haplotype becomes the coordinate system (auto, see below)
-#             2. project    array: minimap2 every haplotype + ptarmigan to it; write each
+#   Negishi   1. pick-ref   the coordinate system: rock ptarmigan by default (see below)
+#             2. project    array: minimap2 every haplotype to it; write each
 #                           one's bases at the reference coordinates (reference-projected
 #                           alignment, insertions dropped, unaligned/duplicated = '-')
 #             3. prep       per-chromosome MSAs -> thexb --minifastas (100 kb windows)
@@ -21,7 +21,8 @@
 #             4. iqtree     array: one IQ-TREE 2 ML tree + UFBoot per window
 #             5. summarize  Tree Viewer .xlsx: trees rooted on ptarmigan, TopologyID =
 #                           species-level topology, + per-window gene counts from the
-#                           reference haplotype's Liftoff GFF3
+#                           reference's annotation (ptarmigan RefSeq GFF, the source of
+#                           the Liftoff GFF3s)
 #
 # WHY A REFERENCE-PROJECTED ALIGNMENT
 #   THExBuilder starts from one multiple alignment per chromosome in which every
@@ -29,16 +30,28 @@
 #   step-03 PGGB graph) would also do, but projection onto one haplotype is what the
 #   THEx authors used (Foley et al. 2021), needs nothing beyond minimap2, and is
 #   insensitive to the RagTag misjoins in final_ptarmigan: a query's scaffolding does
-#   not matter, only where its sequence aligns. Only the REFERENCE haplotype's own
-#   chromosome structure matters, which is why pick-ref chooses it carefully.
+#   not matter, only where its sequence aligns. Only the REFERENCE's own chromosome
+#   structure matters.
 #
-# HOW THE REFERENCE HAPLOTYPE IS CHOSEN (override with REF_ID=...)
-#   Among haplotypes with every chr_*, a full-length chr_Z and no chr_W, the one whose
-#   chromosome lengths deviate least from the panel median (worst chromosome). A
-#   misjoin such as the chr_23+chr_24 merger makes that haplotype's worst deviation
-#   ~100%, so misjoined haplotypes are never picked. Table: work/ref_choice.tsv.
-#   Windows are then in that haplotype's coordinates and named after the ptarmigan
-#   chromosome numbering (chr_6 -> "chr-6" in THEx; THExBuilder swaps '_' for '-').
+# THE REFERENCE (REF_ID)
+#   Default REF_ID=Lmuta: the rock ptarmigan (GCF_023343835.1), renamed to the same
+#   chr_N names the grouse assemblies carry (from the assembly pipeline's
+#   <ASM>.chr_map.tsv). Why the outgroup rather than a grouse haplotype:
+#     - no species is the reference, so no species gets a coverage/mapping advantage;
+#     - every window needs the ptarmigan anyway (trees are rooted on it), so the
+#       regions a ptarmigan reference cannot reach are regions that could not be
+#       rooted with a grouse reference either;
+#     - coordinates and chromosome names are the ones the assemblies, Liftoff and the
+#       manuscript already use, the gene track is the original RefSeq annotation, and
+#       no assembly's misjoins can enter the coordinate system.
+#   Cost: grouse-specific sequence absent from the ptarmigan has no column, and every
+#   haplotype is aligned across ~Lagopus-Tympanuchus divergence (minimap2 asm20).
+#   REF_ID=auto instead picks a grouse haplotype: among those carrying every common
+#   chr_*, a full-length chr_Z and no chr_W, the one whose chromosome lengths deviate
+#   least from the panel median (a misjoin pushes that to ~100%). Table:
+#   work/ref_choice.tsv. REF_ID=<SP>_<SAMPLE>_hap<N> forces one.
+#   THEx shows chromosome names with '-' for '_' (chr_6 -> "chr-6"). chr_N is the
+#   ptarmigan's length rank, NOT chicken chr_N (see README).
 #
 # WHAT THE TopologyID COLUMN MEANS
 #   With 47 tips almost every window has its own exact topology, so THExBuilder's
@@ -119,6 +132,7 @@ IN_DIR="${PROJECT_DIR}/inputs/final_${REF_TAG}"     # copied assemblies + Liftof
 OUTGROUP_DIR="${PROJECT_DIR}/inputs/outgroup"        # copied ptarmigan FASTA + GFF
 WORK="${PROJECT_DIR}/work"
 ENV_PREFIX="${ENV_PREFIX:-${PROJECT_DIR}/envs/thex_env}"
+THEX_GIT="${THEX_GIT:-https://github.com/harris-2374/THEx.git}"   # THExBuilder source (pip)
 
 # ---- SLURM (Negishi: 128 cores, 256 GB per cpu node; ~2 GB per core) ----
 ACCOUNT="${ACCOUNT:-fnrdewoody}"
@@ -126,7 +140,7 @@ PARTITION="${PARTITION:-cpu}"
 QOS="${QOS:-normal}"                                 # standby = 4 h limit, too short for prep/iqtree
 
 # ---- alignment ----
-REF_ID="${REF_ID:-}"                 # e.g. GRPC_F5596_hap1; empty = automatic (pick-ref)
+REF_ID="${REF_ID:-}"                 # empty/Lmuta = ptarmigan (default); auto; or e.g. GRPC_F5596_hap1
 OUTGROUP_NAME="${OUTGROUP_NAME:-Lmuta}"
 PRESET_INGROUP="${PRESET_INGROUP:-asm5}"     # Tympanuchus vs Tympanuchus, < 1% divergence
 PRESET_OUTGROUP="${PRESET_OUTGROUP:-asm20}"  # Lagopus vs Tympanuchus, a few % divergence
@@ -196,15 +210,22 @@ write_ids() {
 }
 
 outgroup_fasta() { ls "${OUTGROUP_DIR}/${OUTGROUP_ACC}"_*_genomic.fna 2>/dev/null | head -1; }
+outgroup_gff()   { ls "${OUTGROUP_DIR}/${OUTGROUP_ACC}"_*_genomic.gff 2>/dev/null | head -1; }
+outgroup_map()   { ls "${OUTGROUP_DIR}/${OUTGROUP_ACC}"_*.chr_map.tsv 2>/dev/null | head -1; }
+OG_REF_FA="${OUTGROUP_DIR}/${OUTGROUP_NAME}.chr.fasta"     # ptarmigan renamed to chr_N
+OG_REF_GFF="${OUTGROUP_DIR}/${OUTGROUP_NAME}.chr.gff"
 
 resolve_ref() {
     if [[ -z "$REF_ID" ]]; then
         [[ -s "$REF_FILE" ]] || die "no reference chosen yet: run 'bash $0 pick-ref' (or set REF_ID)"
         REF_ID="$(cat "$REF_FILE")"
     fi
-    REF_FA="${IN_DIR}/${REF_ID}.pseudo_chr.fasta"
-    REF_GFF="${IN_DIR}/${REF_ID}.liftoff.gff3"
-    [[ -s "$REF_FA" ]] || die "reference FASTA missing: $REF_FA"
+    if [[ "$REF_ID" == "$OUTGROUP_NAME" ]]; then
+        REF_FA="$OG_REF_FA"; REF_GFF="$OG_REF_GFF"
+    else
+        REF_FA="${IN_DIR}/${REF_ID}.pseudo_chr.fasta"; REF_GFF="${IN_DIR}/${REF_ID}.liftoff.gff3"
+    fi
+    [[ -s "$REF_FA" ]] || die "reference FASTA missing: $REF_FA (run pick-ref)"
 }
 
 # =============================================================================
@@ -220,14 +241,15 @@ stage_transfer() {
 
     local need=0 f
     while read -r f; do [[ -s "${IN_DIR}/$f" ]] || need=1; done < "$list"
-    [[ -n "$(outgroup_fasta)" ]] || need=1
+    [[ -n "$(outgroup_fasta)" && -n "$(outgroup_map)" ]] || need=1
     if [[ $need -eq 1 || "${FORCE_SYNC:-false}" == true ]]; then
         log "rsync ${GAUTSCHI_HOST}:${GAUTSCHI_ASM}/final_${REF_TAG}/ -> ${IN_DIR}/  ($(wc -l < "$list") files)"
         rsync -av --partial --files-from="$list" \
             "${GAUTSCHI_HOST}:${GAUTSCHI_ASM}/final_${REF_TAG}/" "${IN_DIR}/"
         log "rsync ptarmigan reference (${OUTGROUP_ACC}) -> ${OUTGROUP_DIR}/"
         rsync -av --partial --include="${OUTGROUP_ACC}_*_genomic.fna*" \
-            --include="${OUTGROUP_ACC}_*_genomic.gff" --exclude='*' \
+            --include="${OUTGROUP_ACC}_*_genomic.gff" --include="${OUTGROUP_ACC}_*.chr_map.tsv" \
+            --exclude='*' \
             "${GAUTSCHI_HOST}:${GAUTSCHI_ASM}/ref/" "${OUTGROUP_DIR}/"
     else
         log "all files already present in ${IN_DIR} (FORCE_SYNC=true to re-sync)"
@@ -258,16 +280,29 @@ stage_setup() {
     command -v conda >/dev/null || die "no conda: try 'module avail conda anaconda'"
     export CONDA_PKGS_DIRS="${PROJECT_DIR}/envs/pkgs"   # keep the package cache off the home quota
     mkdir -p "$CONDA_PKGS_DIRS"
-    if [[ ! -x "${ENV_PREFIX}/bin/thexb" ]]; then
+    # The 'thex' package on the ajharris_2374 channel pins biopython=1.79 etc. without pinning
+    # python, so it no longer solves against current conda-forge. Instead: build the env from
+    # THEx's own pinned dependency list (envs/linux_osx_deps.yaml; the Dash viewer packages are
+    # left out, they are only needed on the laptop), then pip-install THExBuilder from GitHub
+    # with --no-deps so pip cannot change anything conda resolved.
+    if [[ ! -x "${ENV_PREFIX}/bin/python" ]]; then
+        rm -rf "$ENV_PREFIX"     # a failed solve can leave an empty prefix behind
         local solver; solver="$(command -v mamba || command -v conda)"
         log "creating ${ENV_PREFIX} with $(basename "$solver")"
-        "$solver" create -y -p "$ENV_PREFIX" -c ajharris_2374 -c bioconda -c conda-forge \
-            thex iqtree trimal
+        "$solver" create -y -p "$ENV_PREFIX" --override-channels -c conda-forge -c bioconda \
+            --channel-priority flexible \
+            "python=3.9" "biopython=1.79" "pandas=1.2.4" "numpy<1.24" "openpyxl=3.0.7" \
+            "ete3=3.1.2" "p-tqdm=1.4.0" "pyfaidx=0.7.1" six pip git \
+            "iqtree=2.2.0.3" "trimal=1.4.1"
+    fi
+    if [[ ! -x "${ENV_PREFIX}/bin/thexb" ]]; then
+        log "installing THExBuilder from ${THEX_GIT}"
+        "${ENV_PREFIX}/bin/python" -m pip install --no-deps --no-cache-dir "git+${THEX_GIT}"
     fi
     use_env
     log "thexb: $(thexb --version 2>&1 | tail -1)"
     log "iqtree: $("$IQTREE_BIN" --version 2>&1 | grep -m1 -i version)"
-    log "trimal: $(trimal --version 2>&1 | head -1)"
+    log "trimal: $(trimal --version 2>&1 | grep -m1 -i trimal || echo "found at $(command -v trimal)")"
     python -c "import ete3, pandas, openpyxl, pyfaidx" || die "python deps missing from env"
 }
 
@@ -276,13 +311,24 @@ stage_setup() {
 # =============================================================================
 stage_pick_ref() {
     write_ids
-    if [[ -z "$REF_ID" ]]; then
+    [[ -n "$REF_ID" ]] || REF_ID="$OUTGROUP_NAME"
+    if [[ "$REF_ID" == "$OUTGROUP_NAME" ]]; then
+        if [[ ! -s "${OG_REF_FA}.fai" ]]; then
+            local OGF OGM; OGF="$(outgroup_fasta)"; OGM="$(outgroup_map)"
+            [[ -n "$OGF" ]] || die "ptarmigan FASTA missing in ${OUTGROUP_DIR}; run transfer"
+            [[ -n "$OGM" ]] || die "ptarmigan chr_map.tsv missing in ${OUTGROUP_DIR}; run transfer (it is in ${GAUTSCHI_ASM}/ref/)"
+            log "building the ptarmigan reference with grouse chromosome names"
+            python3 "$PYHELP" outgroup-ref --fasta "$OGF" --chr-map "$OGM" \
+                --gff "$(outgroup_gff)" --out-fasta "$OG_REF_FA" --out-gff "$OG_REF_GFF"
+        fi
+    elif [[ "$REF_ID" == auto ]]; then
         REF_ID="$(python3 "$PYHELP" pick-ref --ids "$IDS_FILE" --fai-dir "$IN_DIR" \
                   --exclude "$EXCLUDE_CHROMS" --out-table "${WORK}/ref_choice.tsv")"
         log "automatic reference choice (top of ${WORK}/ref_choice.tsv):"
         head -6 "${WORK}/ref_choice.tsv"
     fi
-    grep -qx "$REF_ID" "$IDS_FILE" || die "REF_ID=$REF_ID is not one of the manifest haplotypes"
+    [[ "$REF_ID" == "$OUTGROUP_NAME" ]] || grep -qx "$REF_ID" "$IDS_FILE" \
+        || die "REF_ID=$REF_ID is not ${OUTGROUP_NAME}, auto, or one of the manifest haplotypes"
     if [[ -s "$REF_FILE" && "$(cat "$REF_FILE")" != "$REF_ID" && -d "$PROJ_DIR" ]]; then
         die "work/ already holds projections onto $(cat "$REF_FILE"); move ${WORK} aside before switching to $REF_ID"
     fi
@@ -290,7 +336,7 @@ stage_pick_ref() {
     resolve_ref
     awk -v ex=",${EXCLUDE_CHROMS}," '$1 ~ /^chr_/ && index(ex, ","$1",")==0 {print $1}' \
         "${REF_FA}.fai" > "$CHROMS_FILE"
-    log "reference haplotype: $REF_ID  ($(wc -l < "$CHROMS_FILE") chromosomes: $(paste -sd' ' "$CHROMS_FILE"))"
+    log "reference: $REF_ID  ($(wc -l < "$CHROMS_FILE") chromosomes: $(paste -sd' ' "$CHROMS_FILE"))"
     grep -qx chr_Z "$CHROMS_FILE" || echo "WARNING: $REF_ID has no chr_Z, so the Z will have no windows"
 }
 
@@ -308,10 +354,11 @@ stage_project() {
     use_env    # python with nothing but the standard library is fine too; this one is known
 
     local Q PRESET MINALN
-    if [[ "$NAME" == "$OUTGROUP_NAME" ]]; then
-        Q="$(outgroup_fasta)"; PRESET="$PRESET_OUTGROUP"; MINALN="$MIN_ALN_OUTGROUP"
+    if [[ "$NAME" == "$OUTGROUP_NAME" ]]; then Q="$(outgroup_fasta)"; else Q="${IN_DIR}/${NAME}.pseudo_chr.fasta"; fi
+    if [[ "$NAME" == "$OUTGROUP_NAME" || "$REF_ID" == "$OUTGROUP_NAME" ]]; then
+        PRESET="$PRESET_OUTGROUP"; MINALN="$MIN_ALN_OUTGROUP"     # across Lagopus-Tympanuchus
     else
-        Q="${IN_DIR}/${NAME}.pseudo_chr.fasta"; PRESET="$PRESET_INGROUP"; MINALN="$MIN_ALN"
+        PRESET="$PRESET_INGROUP"; MINALN="$MIN_ALN"
     fi
     [[ -s "$Q" ]] || die "query FASTA missing: $Q"
 
@@ -363,7 +410,7 @@ stage_prep() {
         python "$PYHELP" annot --gff "$REF_GFF" --fai "${REF_FA}.fai" --chroms "$CHROMS_FILE" \
             --out-gff "${OUT_DIR}/reference_genes.gff" --out-bed "${OUT_DIR}/chromosome_lengths.bed"
     else
-        echo "WARNING: no Liftoff GFF3 for $REF_ID; no gene track"
+        echo "WARNING: no annotation for $REF_ID ($REF_GFF); no gene track"
     fi
 
     # thexb writes into its -o dir and needs -i to exist; its stages read fixed subdirs.
@@ -514,7 +561,7 @@ Windows: ${WINDOW}; trimal -gt ${TRIMAL_GT}; pairwise filter ${PW_FILTER} (cover
 
 grouse_TreeViewer_input.xlsx   Tree Viewer file. TopologyID = species-level topology (see 05_thex_phylogeny.sh header)
 chromosome_lengths.bed         load as the chromosome-length file
-reference_genes.gff            Liftoff genes on ${REF_ID}, load as the GFF/GTF annotation
+reference_genes.gff            genes on ${REF_ID} (ptarmigan RefSeq if Lmuta, else its Liftoff GFF3), load as the GFF/GTF annotation
 grouse_thex.topology_summary.tsv, .topology_by_chromosome.tsv, .window_status.tsv
 EOF
     log "Tree Viewer inputs in ${OUT_DIR}/"
@@ -562,5 +609,5 @@ case "$MODE" in
     iqtree)    stage_iqtree ;;
     summarize) stage_summarize ;;
     status)    stage_status ;;
-    *) sed -n '2,91p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+    *) sed -n '2,104p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

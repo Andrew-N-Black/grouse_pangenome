@@ -3,7 +3,8 @@
 Helper for 05_thex_phylogeny.sh: builds THEx (Tree House Explorer) inputs from the
 prairie grouse haplotype assemblies. Subcommands:
 
-  pick-ref   choose the coordinate-reference haplotype from the assemblies' .fai files
+  outgroup-ref  rock ptarmigan as the coordinate reference, renamed to the grouse chr_ names (default)
+  pick-ref   alternatively, choose a grouse haplotype as the reference from the .fai files
   project    project one assembly onto the reference's coordinates (from a minimap2 PAF with cs tags)
   msa        gather the projections into one multiple alignment per reference chromosome
   annot      THEx annotation track (genes only) + chromosome-lengths BED, in THEx chromosome names
@@ -96,7 +97,15 @@ def cmd_pick_ref(a):
             sys.exit("ERROR: missing %s (run the transfer stage first)" % p)
         fais[i] = read_fai(p)
     excl = set(a.exclude.split(","))
-    chroms = sorted({c for f in fais.values() for c in f if c.startswith("chr_") and c not in excl})
+    # The comparison set is every chr_* carried by at least half the haplotypes, so one
+    # haplotype's odd extra sequence (or a W-bearing haplotype's chr_W) cannot make every
+    # other haplotype "incomplete".
+    counts = defaultdict(int)
+    for f in fais.values():
+        for c in f:
+            if c.startswith("chr_") and c not in excl:
+                counts[c] += 1
+    chroms = sorted(c for c, n in counts.items() if n >= len(fais) / 2.0)
     med = {c: statistics.median([f[c] for f in fais.values() if c in f]) for c in chroms}
     zmax = max([f.get("chr_Z", 0) for f in fais.values()] or [0])
     rows = []
@@ -114,8 +123,71 @@ def cmd_pick_ref(a):
             fh.write("%s\t%s\t%.4f\t%s\t%d\t%s\t%s\n" % (r[2], not r[0], r[1], r[3], r[4], r[5], r[6]))
     best = rows[0]
     if best[0]:
-        sys.exit("ERROR: no haplotype has every chromosome, a full-length chr_Z and no chr_W; set REF_ID by hand")
+        sys.exit("ERROR: no haplotype has every common chromosome, a full-length chr_Z and no chr_W "
+                 "(see %s); set REF_ID by hand" % a.out_table)
     print(best[2])
+
+
+# ------------------------------------------------------------- outgroup-ref --
+def cmd_outgroup_ref(a):
+    """Rock ptarmigan as the coordinate reference, with its chromosomes renamed exactly the
+    way the assembly pipeline named the grouse chromosomes (chr_ + the assembly report's
+    name, from <ASM>.chr_map.tsv: accession -> name). Only assembled molecules are kept.
+    Writes FASTA (80 columns) + .fai, and the RefSeq GFF restricted to those sequences."""
+    amap = {}
+    with open(a.chr_map) as fh:
+        for line in fh:
+            f = line.rstrip("\n").split("\t")
+            if len(f) >= 2 and not line.startswith("#"):
+                amap[f[0]] = "chr_" + f[1]
+    if not amap:
+        sys.exit("ERROR: empty chromosome map %s" % a.chr_map)
+    tmp = a.out_fasta + ".part"
+    fai = []
+    offset = 0
+
+    def flush(name, chunks, oh):
+        nonlocal offset
+        seq = b"".join(chunks)
+        hdr = b">" + name.encode() + b"\n"
+        oh.write(hdr)
+        offset += len(hdr)
+        fai.append((name, len(seq), offset))
+        for i in range(0, len(seq), 80):
+            oh.write(seq[i:i + 80] + b"\n")
+        offset += len(seq) + (len(seq) + 79) // 80
+
+    with open(a.fasta, "rb") as ih, open(tmp, "wb") as oh:
+        name, chunks = None, []
+        for line in ih:
+            if line.startswith(b">"):
+                if name is not None:
+                    flush(name, chunks, oh)
+                acc = line[1:].split()[0].decode()
+                name, chunks = amap.get(acc), []
+            elif name is not None:
+                chunks.append(line.strip())
+        if name is not None:
+            flush(name, chunks, oh)
+    if len(fai) != len(amap):
+        sys.exit("ERROR: %d of %d chromosome-map accessions found in %s" % (len(fai), len(amap), a.fasta))
+    os.replace(tmp, a.out_fasta)
+    with open(a.out_fasta + ".fai", "w") as fh:
+        for n, L, off in fai:
+            fh.write("%s\t%d\t%d\t80\t81\n" % (n, L, off))
+    n = 0
+    if a.gff:
+        with open(a.gff) as ih, open(a.out_gff, "w") as oh:
+            for line in ih:
+                if line.startswith("#"):
+                    continue
+                f = line.split("\t")
+                if len(f) == 9 and f[0] in amap:
+                    f[0] = amap[f[0]]
+                    oh.write("\t".join(f))
+                    n += 1
+    sys.stderr.write("[outgroup-ref] %d chromosomes (%s ... %s), %d GFF lines\n"
+                     % (len(fai), fai[0][0], fai[-1][0], n))
 
 
 # --------------------------------------------------------------------- project --
@@ -424,6 +496,13 @@ def main():
     s.add_argument("--exclude", default="chr_W,chr_MT")
     s.add_argument("--out-table", required=True)
 
+    s = sp.add_parser("outgroup-ref")
+    s.add_argument("--fasta", required=True)
+    s.add_argument("--gff")
+    s.add_argument("--chr-map", required=True)
+    s.add_argument("--out-fasta", required=True)
+    s.add_argument("--out-gff")
+
     s = sp.add_parser("project")
     s.add_argument("--ref", required=True)
     s.add_argument("--paf")
@@ -467,7 +546,7 @@ def main():
     a = p.parse_args()
     if not a.cmd:
         p.error("choose a subcommand")
-    {"pick-ref": cmd_pick_ref, "project": cmd_project, "msa": cmd_msa,
+    {"pick-ref": cmd_pick_ref, "outgroup-ref": cmd_outgroup_ref, "project": cmd_project, "msa": cmd_msa,
      "annot": cmd_annot, "summarize": cmd_summarize}[a.cmd](a)
 
 
