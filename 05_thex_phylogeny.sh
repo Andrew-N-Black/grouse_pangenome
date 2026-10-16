@@ -155,6 +155,7 @@ MIN_ALN="${MIN_ALN:-5000}"                   # minimum alignment block length (P
 MIN_ALN_OUTGROUP="${MIN_ALN_OUTGROUP:-1000}"
 EXCLUDE_CHROMS="${EXCLUDE_CHROMS:-chr_W,chr_MT}"
 MIN_CHROM_COV="${MIN_CHROM_COV:-0.5}"        # drop a haplotype from a chromosome below this
+MIN_CHROM_TAXA="${MIN_CHROM_TAXA:-0.5}"      # drop a chromosome kept by fewer than this fraction of haplotypes
 PROJECT_CPUS="${PROJECT_CPUS:-32}"
 
 # ---- THExBuilder ----
@@ -191,6 +192,7 @@ OUT_DIR="${WORK}/thex_inputs"
 IDS_FILE="${WORK}/haplotype_ids.txt"      # 46 haplotypes, manifest order
 NAMES_FILE="${WORK}/alignment_names.txt"  # 46 haplotypes + outgroup
 CHROMS_FILE="${WORK}/chromosomes.txt"
+MSA_CHROMS="${WORK}/chromosomes_in_msa.txt"   # after dropping chromosomes too few haplotypes cover
 REF_FILE="${WORK}/ref_id.txt"
 MODE="${1:-}"
 
@@ -420,12 +422,38 @@ stage_prep() {
             --log "${WORK}/samples_per_chromosome.tsv"
         touch "${MSA_DIR}/.done"
     fi
-    awk -F'\t' '$4=="no"' "${WORK}/samples_per_chromosome.tsv" | sed 's/^/  excluded: /' | head -40
+    # (awk alone: a '| head' here would SIGPIPE the writer and, under pipefail, end the job)
+    awk -F'\t' '$4=="no" && n++ < 40 {print "  haplotype excluded: "$0}' "${WORK}/samples_per_chromosome.tsv"
+
+    # ---- 1b. drop chromosomes that too few haplotypes cover ----
+    # A chromosome where most haplotypes fall below MIN_CHROM_COV would give windows of the
+    # outgroup alone (or a handful of tips); those cannot make trees. Their alignments are
+    # moved to msa_excluded/ and every later stage uses MSA_CHROMS instead of CHROMS_FILE.
+    local n_hap; n_hap=$(wc -l < "$IDS_FILE")
+    awk -F'\t' -v og="$OUTGROUP_NAME" -v nh="$n_hap" -v f="$MIN_CHROM_TAXA" '
+        NR>1 && $2!=og && $4=="yes" {k[$1]++}
+        NR>1 {seen[$1]=1}
+        END {for (c in seen) printf "%s\t%d\t%s\n", c, k[c]+0, ((k[c]+0) >= f*nh ? "keep" : "drop")}' \
+        "${WORK}/samples_per_chromosome.tsv" > "${WORK}/chromosome_taxa.tsv"
+    mkdir -p "${WORK}/msa_excluded"
+    : > "$MSA_CHROMS"
+    local c
+    while read -r c; do
+        if awk -F'\t' -v c="$c" '$1==c && $3=="drop" {found=1} END {exit !found}' "${WORK}/chromosome_taxa.tsv"; then
+            echo "  chromosome dropped: $c ($(awk -F'\t' -v c="$c" '$1==c {print $2}' "${WORK}/chromosome_taxa.tsv") of ${n_hap} haplotypes above ${MIN_CHROM_COV} coverage)"
+            mv -f "${MSA_DIR}/${c}.fasta"* "${WORK}/msa_excluded/" 2>/dev/null || true
+        else
+            # kept now but dropped by an earlier run with a stricter MIN_CHROM_TAXA: restore it
+            [[ -e "${WORK}/msa_excluded/${c}.fasta" ]] && mv -f "${WORK}/msa_excluded/${c}.fasta"* "${MSA_DIR}/"
+            echo "$c" >> "$MSA_CHROMS"
+        fi
+    done < "$CHROMS_FILE"
+    log "$(wc -l < "$MSA_CHROMS") of $(wc -l < "$CHROMS_FILE") chromosomes go on to windowing"
 
     # ---- 2. THEx annotation track + chromosome lengths ----
     mkdir -p "$OUT_DIR"
     if [[ -s "$REF_GFF" ]]; then
-        python "$PYHELP" annot --gff "$REF_GFF" --fai "${REF_FA}.fai" --chroms "$CHROMS_FILE" \
+        python "$PYHELP" annot --gff "$REF_GFF" --fai "${REF_FA}.fai" --chroms "$MSA_CHROMS" \
             --out-gff "${OUT_DIR}/reference_genes.gff" --out-bed "${OUT_DIR}/chromosome_lengths.bed"
     else
         echo "WARNING: no annotation for $REF_ID ($REF_GFF); no gene track"
@@ -441,7 +469,7 @@ stage_prep() {
         log "thexb --minifastas ($WINDOW)"
         thexb --minifastas -i "$MSA_DIR" -o "$THEXB_DIR" -w "$WINDOW" --cpu "$CPUS"
         local nchr; nchr=$(find windowed_fastas -mindepth 1 -maxdepth 1 -type d | wc -l)
-        [[ "$nchr" -eq "$(wc -l < "$CHROMS_FILE")" ]] || die "minifastas wrote $nchr of $(wc -l < "$CHROMS_FILE") chromosomes; see ${THEXB_DIR}/logs/minifastas.log"
+        [[ "$nchr" -eq "$(wc -l < "$MSA_CHROMS")" ]] || die "minifastas wrote $nchr of $(wc -l < "$MSA_CHROMS") chromosomes; see ${THEXB_DIR}/logs/minifastas.log"
         touch windowed_fastas/.done
     fi
     log "$(find windowed_fastas -name '*.fasta' | wc -l) windows"
@@ -567,10 +595,10 @@ stage_summarize() {
         --windowed-dir "${THEXB_DIR}/windowed_fastas" \
         --trimal-dir "${THEXB_DIR}/trimal_filtered_windows" \
         --pw-dir "${THEXB_DIR}/pairwise_filtered_windows" \
-        --iqtree-dir "$IQ_DIR" --names "$NAMES_FILE" --chroms "$CHROMS_FILE" \
+        --iqtree-dir "$IQ_DIR" --names "$NAMES_FILE" --chroms "$MSA_CHROMS" \
         --gff "${OUT_DIR}/reference_genes.gff" --outgroup "$OUTGROUP_NAME" --species "$SPECIES" \
         --out-xlsx "${OUT_DIR}/grouse_TreeViewer_input.xlsx" --out-prefix "${OUT_DIR}/grouse_thex"
-    cp "${WORK}/samples_per_chromosome.tsv" "${WORK}/ref_choice.tsv" "$OUT_DIR"/ 2>/dev/null || true
+    cp "${WORK}/samples_per_chromosome.tsv" "${WORK}/chromosome_taxa.tsv" "${WORK}/ref_choice.tsv" "$OUT_DIR"/ 2>/dev/null || true
     cat > "${OUT_DIR}/README.txt" <<EOF
 THEx Tree Viewer inputs, prairie grouse, $(date +%F)
 Coordinates: ${REF_ID} (chromosome names as in THEx: '_' -> '-')
