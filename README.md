@@ -14,7 +14,8 @@ data.
 ## Relationship to the assembly pipeline
 
 **This repo starts where [`prairie_grouse`](https://github.com/Andrew-N-Black/prairie_grouse)
-finishes.** That repo assembles and QCs the 23 individuals (46 haplotypes);
+finishes.** (The genome-wide window-phylogeny (THEx) analysis, formerly step 05 here, now
+lives in `prairie_grouse` as step 13, next to the mitogenome steps.) That repo assembles and QCs the 23 individuals (46 haplotypes);
 this one consumes its output. Nothing here re-runs an assembler.
 
 Specifically, steps 01–03 read, for every sample in `assembly_manifest.tsv`:
@@ -61,7 +62,6 @@ two chromosomes), so this is not a formality.
 | 02d | [`02d_plot_qc_report.R`](02d_plot_qc_report.R) | Figure from 02c's table (USFWS report Fig. S8): completeness, QV and median HiFi depth per bird, W-bearing haplotypes open. | local R |
 | 03 | [`03_pangenome_build.sh`](03_pangenome_build.sh) | Renames every haplotype to PanSN (`species.sample#hap#contig`), concatenates them, and builds one PGGB graph. Then: `odgi` graph stats and per-haplotype path lengths, `panacus` core/accessory growth by species, de novo RepeatModeler library per species → RepeatMasker on all 46 haplotypes, and a Python pass that joins genome length + Liftoff gene counts + TE content into per-haplotype and per-species tables. | single job, 64 cpu, 500 G, 14 d |
 | 04 | [`04_shortread_introgression.sh`](04_shortread_introgression.sh) | Converts the graph to GBZ + giraffe indexes, then per short-read sample: `vg giraffe` → `vg pack` → `vg call` per reference contig → concatenate. Merges to a joint VCF with `bcftools`, then `Dsuite Dtrios` for genome-wide ABBA-BABA D-statistics and `Dsuite Dinvestigate` for windowed D/f_d on the trio the data supports. | single job, 64 cpu, 250 G, 10 d |
-| 05 | [`05_thex_phylogeny.sh`](05_thex_phylogeny.sh) (+ [`.py`](05_thex_phylogeny.py)) | **Runs on Negishi.** Pulls the 46 haplotype assemblies, their Liftoff GFF3s and the rock ptarmigan from Gautschi, projects every haplotype onto the rock ptarmigan reference renamed to the grouse chr_N names (minimap2 asm20; `REF_ID=auto` uses a grouse haplotype instead), builds per-chromosome alignments, then THExBuilder windowing (100 kb) → trimal → pairwise filter, IQ-TREE 2 + UFBoot per window, and writes a THEx Tree Viewer file: trees rooted on ptarmigan, `TopologyID` = species-level topology, gene counts per window, plus the gene track and chromosome-length BED. | array → node → array → small job |
 
 Steps 03 and 04 are single jobs rather than arrays, because a pangenome is
 inherently a joint analysis. The embarrassingly parallel sub-steps (RepeatMasker per genome,
@@ -84,10 +84,6 @@ STAGE=summary sbatch --export=ALL -t 4-00:00:00 03_pangenome_build.sh   # merge 
 #   (or, whole genome in one job: sbatch 03_pangenome_build.sh)
 # then, once the graph exists:
 sbatch 04_shortread_introgression.sh
-# THEx window trees (on NEGISHI, from the repo root; independent of steps 01-04):
-bash 05_thex_phylogeny.sh transfer   # pull assemblies from Gautschi (passwordless ssh, see script header)
-bash 05_thex_phylogeny.sh setup      # THEx conda env on scratch
-bash 05_thex_phylogeny.sh submit     # project -> prep -> iqtree -> summarize
 ```
 
 ### Why the joins are cut before the graph (step 01)
