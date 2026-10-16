@@ -2,7 +2,7 @@
 """
 Step 05b: statistics for the THEx window-tree results (run after 05_thex_phylogeny.sh).
 
-    python 05b_thex_stats.py grouse_TreeViewer_input.xlsx chromosome_lengths.bed [out_prefix]
+    python 05b_thex_stats.py grouse_TreeViewer_input.xlsx chromosome_lengths.bed [out_prefix] [min_windows=20]
 
 Runs in the THEx env (pandas, scipy, statsmodels, scikit-posthocs). Writes <out_prefix>.*.tsv
 and prints a summary.
@@ -57,7 +57,11 @@ pc["length_mb"] = pc.index.map(L) / 1e6
 pc["genes_per_mb"] = d.groupby("Chromosome")["Genes"].sum() / pc["length_mb"]
 pc = pc.sort_values("length_mb", ascending=False)
 pc.to_csv(out + ".per_chromosome.tsv", sep="\t")
-auto = pc.drop(index="chr-Z", errors="ignore")
+MIN_WIN = int(sys.argv[4]) if len(sys.argv) > 4 else 20
+auto_all = pc.drop(index="chr-Z", errors="ignore")
+auto = auto_all[auto_all["n_windows"] >= MIN_WIN]   # a 1-window chromosome is not a proportion
+print("chromosome-level tests use %d autosomes with >= %d windows with trees (left out: %s)"
+      % (len(auto), MIN_WIN, ", ".join(auto_all.index[auto_all["n_windows"] < MIN_WIN]) or "none"))
 
 print("=" * 78)
 print("1. Z vs AUTOSOMES (Z compared with the distribution of %d autosomes)" % len(auto))
@@ -76,8 +80,9 @@ if "chr-Z" in pc.index:
     r1 = pd.DataFrame(rows)
     print(r1.to_string(index=False))
     r1.to_csv(out + ".Z_vs_autosomes.tsv", sep="\t", index=False)
-    print("  -> empirical p = (autosomes at least as extreme + 1) / (n autosomes + 1); with 31 autosomes the")
-    print("     smallest possible value is 1/32 = 0.031. Report it as 'the Z exceeds every autosome'.")
+    print("  -> empirical p = (autosomes at least as extreme + 1) / (n autosomes + 1); with %d autosomes the"
+          % len(auto))
+    print("     smallest possible value is 1/%d = %.3f. Report it as 'the Z exceeds every autosome'." % (len(auto) + 1, 1 / (len(auto) + 1)))
 
 print("=" * 78)
 print("2. CHROMOSOME SIZE / GENE DENSITY (autosomes, one value per chromosome, Spearman)")
