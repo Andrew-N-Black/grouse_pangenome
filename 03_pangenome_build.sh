@@ -590,6 +590,22 @@ with open(manifest_path) as fh:
     reader = csv.DictReader(data_rows, delimiter='\t')
     samples = [(row['species'], row['sample_id']) for row in reader if row.get('sample_id')]
 
+te_re = re.compile(r'Total interspersed repeats.*?([\d.]+)\s*%')
+# Repeat classes from the RepeatMasker .tbl summary (% of sequence). Rows look like
+#   "   LINEs:   10123   40211234 bp   3.87 %"  /  "     L2/CR1/Rex   9000  3800000 bp  3.65 %"
+# Sub-classes (L2/CR1/Rex, ERV_*) are nested inside their class (LINE, LTR), so only the
+# class columns add up to te_pct_masked (+ satellites/simple/low complexity, which are not
+# interspersed repeats and are not part of it).
+TE_CLASSES = [  # (.tbl row label, output column)
+    ('SINEs', 'pct_SINE'), ('LINEs', 'pct_LINE'), ('L2/CR1/Rex', 'pct_LINE_CR1'),
+    ('LTR elements', 'pct_LTR'), ('ERV_classI', 'pct_LTR_ERV1'), ('ERV_classII', 'pct_LTR_ERV2'),
+    ('ERVL', 'pct_LTR_ERVL'), ('DNA transposons', 'pct_DNA'), ('Rolling-circles', 'pct_RC'),
+    ('Unclassified', 'pct_Unclassified'), ('Satellites', 'pct_Satellite'),
+    ('Simple repeats', 'pct_Simple'), ('Low complexity', 'pct_LowComplexity'),
+]
+TE_CLASS_COLS = [c for _, c in TE_CLASSES]
+tbl_row_re = re.compile(r'^\s*([A-Za-z][A-Za-z0-9 /_\-]*?):?\s+(?:\d+\s+)?\d+ bp\s+([\d.]+)\s*%')
+
 records = {}  # (species, sample, hap) -> dict of metrics
 
 def rec(species, sample, hap):
@@ -597,6 +613,7 @@ def rec(species, sample, hap):
         'species': species, 'sample': sample, 'haplotype': hap,
         'length_bp': None, 'genes_mapped': None, 'genes_unmapped': None,
         'te_pct_masked': None,
+        **{c: None for c in TE_CLASS_COLS},
     })
 
 # --- genome length, from the pangenome path table written in Step 4 ---
@@ -614,7 +631,6 @@ for key, total in per_hap_len.items():
 # All paths below are constructed forward from (species, sample, hap) taken
 # straight from the manifest — never reverse-parsed out of filenames, since
 # species/sample values may themselves contain underscores.
-te_re = re.compile(r'Total interspersed repeats.*?([\d.]+)\s*%')
 
 for species, sample in samples:
     for hap in ('hap1', 'hap2'):
@@ -649,11 +665,17 @@ for species, sample in samples:
                     m = te_re.search(line)
                     if m:
                         rec(species, sample, hap)['te_pct_masked'] = float(m.group(1))
-                        break
+                        continue
+                    m = tbl_row_re.match(line)
+                    if m:
+                        label = m.group(1).strip()
+                        for tbl_label, col in TE_CLASSES:
+                            if label == tbl_label and rec(species, sample, hap)[col] is None:
+                                rec(species, sample, hap)[col] = float(m.group(2))
 
 # --- write per-haplotype table ---
 per_hap_out = os.path.join(compare_dir, 'per_haplotype_summary.tsv')
-fields = ['species', 'sample', 'haplotype', 'length_bp', 'genes_mapped', 'genes_unmapped', 'te_pct_masked']
+fields = ['species', 'sample', 'haplotype', 'length_bp', 'genes_mapped', 'genes_unmapped', 'te_pct_masked'] + TE_CLASS_COLS
 with open(per_hap_out, 'w', newline='') as fh:
     w = csv.DictWriter(fh, fieldnames=fields, delimiter='\t')
     w.writeheader()
@@ -672,7 +694,8 @@ with open(species_out, 'w', newline='') as fh:
                 'mean_length_bp', 'sd_length_bp',
                 'mean_genes_mapped', 'sd_genes_mapped',
                 'mean_genes_unmapped', 'sd_genes_unmapped',
-                'mean_te_pct_masked', 'sd_te_pct_masked'])
+                'mean_te_pct_masked', 'sd_te_pct_masked']
+               + [f'{p}_{c}' for c in TE_CLASS_COLS for p in ('mean', 'sd')])
     for species, recs in sorted(by_species.items()):
         def col(name):
             vals = [r[name] for r in recs if r[name] is not None]
@@ -685,7 +708,8 @@ with open(species_out, 'w', newline='') as fh:
         gm_m, gm_sd = col('genes_mapped')
         gu_m, gu_sd = col('genes_unmapped')
         te_m, te_sd = col('te_pct_masked')
-        w.writerow([species, len(recs), length_m, length_sd, gm_m, gm_sd, gu_m, gu_sd, te_m, te_sd])
+        te_cls = [v for c in TE_CLASS_COLS for v in col(c)]
+        w.writerow([species, len(recs), length_m, length_sd, gm_m, gm_sd, gu_m, gu_sd, te_m, te_sd] + te_cls)
 
 print(f"  Wrote {per_hap_out}")
 print(f"  Wrote {species_out}")
