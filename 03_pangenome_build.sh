@@ -432,8 +432,8 @@ odgi paths -i "$OG" -H -D '#' -t "$THREADS" > "${COMPARE_DIR}/path_lengths_raw.t
 echo -e "species\tsample\thaplotype\tcontig\tpath_length_bp" > "${COMPARE_DIR}/genome_length_by_haplotype.tsv"
 awk -F'\t' 'NR>1 {
     split($1, sp, ".")          # $1=group.name=species.sample -> sp[1]=species sp[2]=sample
-    split($2, p, "#")           # $2=path.name=species.sample#hap#contig -> p[2]=hap p[3]=contig
-    print sp[1]"\t"sp[2]"\thap"p[2]"\t"p[3]"\t"$3   # PanSN hap "1" -> "hap1" to match manifest-built keys
+    n = split($2, p, "#")       # hap and contig are always the last two #-separated fields
+    print sp[1]"\t"sp[2]"\thap"p[n-1]"\t"p[n]"\t"$3   # PanSN hap "1" -> "hap1" to match manifest-built keys
 }' "${COMPARE_DIR}/path_lengths_raw.tsv" >> "${COMPARE_DIR}/genome_length_by_haplotype.tsv"
 
 echo "  Wrote ${COMPARE_DIR}/genome_length_by_haplotype.tsv"
