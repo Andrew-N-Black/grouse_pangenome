@@ -6,9 +6,7 @@
 # step 01's pangenome_inputs/ FASTAs (Hi-C-unsupported RagTag joins cut);
 # the TE and gene comparisons read the assembly pipeline's final_ptarmigan/
 # directly (hifiasm + yahs + RagTag pseudo-chromosomes, with Liftoff gene
-# annotations transferred from the rock ptarmigan reference), since cutting
-# a join removes only a 100 bp gap and the Liftoff GFF3 seqids name the
-# uncut chromosomes.
+# annotations transferred from the rock ptarmigan reference)
 #
 # Builds ONE combined pangenome graph across all haplotype assemblies from
 # all three species (PGGB), then uses it — plus the existing Liftoff/TE
@@ -18,24 +16,8 @@
 #   - transposable element content (RepeatModeler + RepeatMasker)
 #   - gene content (Liftoff-mapped ptarmigan gene counts)
 #
-# This is NOT an array job: a pangenome is inherently a joint analysis across
-# all samples, so everything runs in one job. The one genuinely
-# embarrassingly-parallel sub-step (RepeatMasker per genome) is parallelized
-# internally with `xargs -P`.
-#
-# HONEST SCOPE NOTE: whole-genome PGGB across ~46 haplotypes of ~1.1 Gb bird
-# genomes is a heavy, potentially multi-day-to-multi-week alignment job. The
-# resource/time requests below are rough starting points, not a guarantee —
-# check them against what your Purdue RCAC allocation actually offers, and
-# consider per-chromosome partitioning (pggb's `partition-before-pggb`
-# helper) if the whole-genome run doesn't finish in your walltime. Because
-# your assemblies are already RagTag-oriented against the same rock ptarmigan
-# reference, chromosome-level partitioning should work cleanly if needed.
-#
 # RUN MODES (all from the repo root)
-#   Whole genome, one job (original behaviour):
-#       sbatch 03_pangenome_build.sh
-#   Per chromosome (recommended; graphs are built independently per ptarmigan
+#   Per chromosome (graphs are built independently per ptarmigan
 #   chromosome, which is valid because every haplotype is RagTag-oriented to
 #   the same reference, and pieces cut in step 01 keep their chromosome name):
 #       bash 03_pangenome_build.sh list            # writes pangenome/chromosomes.txt, prints the array command
@@ -48,10 +30,6 @@
 #   Per-chromosome jobs run steps 1-5 only, into pangenome/<CHROM>/ and
 #   comparison/<CHROM>/. CHROM=unplaced collects every sequence not named
 #   chr_* (unplaced scaffolds, relabelled male W pieces).
-#
-# SOFTWARE: Gautschi has no pggb, odgi, vg or RepeatMasker module. Each tool is
-#   used from a module when one is on PATH, otherwise from an Apptainer image
-#   in ${PROJECT_DIR}/containers (fetch once with accessory/pull_containers.sh).
 #
 # A NOTE ON CHROMOSOME NAMES
 #   The assemblies carry the ptarmigan reference's own chromosome numbering,
