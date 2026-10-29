@@ -428,7 +428,7 @@ odgi stats -i "$OG" -S > "${COMPARE_DIR}/pangenome_graph_summary.yaml"
 #   group.name  path.name  path.length  path.step.count  [node.1 ... node.N]
 # group.name is everything before the first '#' in path.name — for our
 # PanSN names (species.sample#1|2#contig) that's "species.sample".
-odgi paths -i "$OG" -H -D '#' -t "$THREADS" > "${COMPARE_DIR}/path_lengths_raw.tsv"
+odgi paths -i "$OG" -H -D '#' -t "$THREADS" | cut -f1-3 > "${COMPARE_DIR}/path_lengths_raw.tsv"
 echo -e "species\tsample\thaplotype\tcontig\tpath_length_bp" > "${COMPARE_DIR}/genome_length_by_haplotype.tsv"
 awk -F'\t' 'NR>1 {
     split($1, sp, ".")          # $1=group.name=species.sample -> sp[1]=species sp[2]=sample
