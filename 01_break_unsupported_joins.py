@@ -9,8 +9,7 @@ WHY
     Minigraph-Cactus) assigns sequences to chromosomes by alignment and gains
     nothing from that order, but an incorrect join becomes a false structural
     variant in the graph. So every join whose Hi-C support was judged
-    'unsupported' by the assembly repo's step 13 (13_join_support_ptarmigan.sh)
-    is cut at its gap,
+    'unsupported' by the assembly is cut at its gap,
     and the gap is removed. Nothing else changes: no bases are added, removed
     or reordered apart from the N runs of the broken gaps.
 
@@ -20,17 +19,6 @@ INPUTS (per haplotype, prefix <SP>_<SAMPLE>_<HAP>)
     <ragtag-dir>/<S>.<H>/<S>.<H>.rename_map.tsv    AGP object -> current name
     <joins-dir>/<P>.joins.tsv                       step 13 verdicts
     <final-dir>/W_relabel_log.tsv (optional)        male chr_W -> scaffold_N
-
-    The chromosome names were changed twice after RagTag (homology names, then
-    native names in step 14; males' chr_W later relabelled). AGP coordinates are
-    still valid because renaming never changed a base, and this script PROVES
-    that per chromosome before cutting: the AGP object length must equal the
-    FASTA length, and every gap it cuts must be all-N in the FASTA. Any mismatch
-    stops the run.
-
-    The position column of the joins table is not assumed: the script finds the
-    numeric column whose values fall on AGP gaps, and refuses to proceed if no
-    column does so for at least 95% of rows.
 
 OUTPUTS (in --out-dir)
     <P>.pg_input.fasta    assembly with broken chromosomes replaced by pieces
@@ -43,10 +31,8 @@ OUTPUTS (in --out-dir)
 JOINS ON THE REFERENCE'S UNPLACED SCAFFOLDS
     RagTag also concatenated grouse scaffolds that align to the same UNPLACED
     ptarmigan scaffold (NW_ accessions); step 09 named those objects
-    scaffold_N. Step 13 scored joins on chr_* sequences only, so these joins
-    were never tested — and they rest on the weakest evidence RagTag has (an
-    unplaced, often repetitive reference scaffold). By default they are all
-    cut, verdict 'untested_unplaced'. --keep-unplaced-joins leaves them.
+    scaffold_N. Joinings were only scored on chr_* sequences only, so these joins
+    were never tested
 
 MODES (--break)
     unsupported              default: cut joins step 13 called unsupported
